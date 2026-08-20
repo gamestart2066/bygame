@@ -1,181 +1,247 @@
 import {
-    _decorator, Component, Node, Graphics, UITransform, Vec3, Vec2,
-    RigidBody2D, CircleCollider2D, ERigidBody2DType, tween,
+    _decorator, Component, Node, Sprite, UIOpacity, Vec3, Vec2, Color,
+    RigidBody2D, CircleCollider2D, ERigidBody2DType, Tween, tween,
 } from 'cc';
 import { BallColor, BallState, CFG, getColor } from '../core/GameTypes';
+import { BallVisuals } from './BallVisuals';
 
-const { ccclass } = _decorator;
+const { ccclass, property } = _decorator;
 
-/**
- * 小球。
- *
- * 混合驱动（架构决策，见 TECH_NOTES）：
- * - Falling / Waiting 阶段：Box2D 真实物理
- * - OnTrack 阶段：关闭物理，由 TrackSystem 按槽位角度直接定位
- * - Collecting 阶段：Tween 飞入收纳箱
- */
+/** Prefab 驱动的小球；节点、Sprite 与物理组件都必须来自 Ball.prefab。 */
 @ccclass('Ball')
 export class Ball extends Component {
+    @property({ type: Sprite, tooltip: 'Ball/Sprite 上的 Sprite；留空时按节点名查找' })
+    public ballSprite: Sprite | null = null;
+
     public colorId: BallColor = BallColor.Red;
     public state: BallState = BallState.InBlock;
-
-    /** 占据的轨道槽位索引，未在轨道上时为 -1 */
     public slotIndex: number = -1;
-    /** 进入等待队列的序号，用于先到先入仲裁 */
     public waitTicket: number = 0;
 
     private _rb: RigidBody2D | null = null;
     private _collider: CircleCollider2D | null = null;
-    /** 视觉子节点（只承载 Graphics，与物理解耦） */
     private _view: Node | null = null;
+    private _recycled: boolean = true;
+    private _lifecycleToken: number = 0;
+    private _recycleHandler: ((ball: Ball) => void) | null = null;
 
-    /**
-     * 工厂方法：创建一个小球节点，先从格子飞到出生点（由小变大），落地后再启用物理。
-     * @param fromPos 起点（格子底边，视觉出生位置）
-     * @param toPos 终点（V 槽上方的真正出生点，落地后开始物理下落）
-     */
-    public static create(color: BallColor, fromPos: Vec3, toPos: Vec3, parent: Node): Ball {
-        const node = new Node('Ball');
-        node.addComponent(UITransform);
-        node.setParent(parent);
-        node.setPosition(fromPos);
-
-        const ball = node.addComponent(Ball);
-        ball.colorId = color;
-        ball.draw();
-        ball.playSpawnFlight(toPos, () => ball.setupPhysics());
-        return ball;
+    protected onLoad(): void {
+        this.cachePrefabParts();
     }
 
-    /**
-     * 出生飞行动画：从格子飞到出生点，飞行途中由小变大；到达后才启用物理。
-     *
-     * 只对 View 子节点做 scale 补间，根节点（刚体 + 碰撞体）始终是 1 倍，
-     * 因此不会影响碰撞半径、堆叠与汇流。飞行期间未挂物理组件，纯 Tween 驱动。
-     */
-    private playSpawnFlight(toPos: Vec3, onArrive: () => void): void {
+    public validatePrefab(): boolean {
+        this.cachePrefabParts();
+        const missing: string[] = [];
+        if (!this.ballSprite) missing.push('Ball/Sprite 的 Sprite');
+        if (this.ballSprite && !this.ballSprite.spriteFrame) missing.push('基础球 SpriteFrame');
+        if (!this._rb) missing.push('Ball 根节点的 RigidBody2D');
+        if (!this._collider) missing.push('Ball 根节点的 CircleCollider2D');
+        if (missing.length > 0) {
+            console.error(`[Ball] Ball.prefab 配置不完整：${missing.join('、')}。`);
+            return false;
+        }
+        return true;
+    }
+
+    /** 从 Pool 取出后开始一个等价于全新实例的生命周期。 */
+    public activate(
+        color: BallColor,
+        fromPos: Vec3,
+        toPos: Vec3,
+        parent: Node,
+        recycleHandler: (ball: Ball) => void
+    ): boolean {
+        if (!this.validatePrefab()) return false;
+        this.stopAsyncWork();
+        this._lifecycleToken++;
+        const token = this._lifecycleToken;
+        this._recycled = false;
+        this._recycleHandler = recycleHandler;
+        this.colorId = color;
+        this.state = BallState.InBlock;
+        this.slotIndex = -1;
+        this.waitTicket = 0;
+
+        this.node.setParent(parent);
+        this.node.active = true;
+        this.node.setPosition(fromPos);
+        this.node.setRotationFromEuler(0, 0, 0);
+        this.node.setScale(1, 1, 1);
+        this.resetViewTransform();
+        this.resetVisual(color);
+        this.disablePhysics();
+        this.playSpawnFlight(toPos, token);
+        return true;
+    }
+
+    private cachePrefabParts(): void {
+        this._rb = this.getComponent(RigidBody2D);
+        this._collider = this.getComponent(CircleCollider2D);
+        this._view = this.node.getChildByName('Sprite');
+        this.ballSprite = this.ballSprite
+            ?? this._view?.getComponent(Sprite)
+            ?? this.getComponentInChildren(Sprite);
+    }
+
+    private playSpawnFlight(toPos: Vec3, token: number): void {
         const view = this._view;
-        const from = CFG.ballSpawnScaleFrom;
+        const fromScale = CFG.ballSpawnScaleFrom;
         const duration = CFG.ballSpawnDuration;
+        if (view) view.setScale(fromScale, fromScale, 1);
 
         if (duration <= 0) {
             this.node.setPosition(toPos);
-            onArrive();
+            if (view) view.setScale(1, 1, 1);
+            this.enablePhysics(token);
             return;
         }
-
         tween(this.node)
             .to(duration, { position: toPos }, { easing: 'quadOut' })
-            .call(onArrive)
+            .call(() => this.enablePhysics(token))
             .start();
-
-        if (view && from < 1) {
-            view.setScale(from, from, 1);
+        if (view) {
             tween(view)
                 .to(duration, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
                 .start();
         }
     }
 
-    /**
-     * 用 Graphics 绘制纯色圆（原型阶段无美术资源）。
-     *
-     * ❗ 视觉画在 **View 子节点**上而不是根节点：
-     * 根节点挂着 `CircleCollider2D`，缩放根节点会连带缩放碰撞体
-     * （scale 为 0 时半径为 0，Box2D 行为异常）。
-     * 拆开后出生动画只影响表现，物理完全不受干扰。
-     */
-    private draw(): void {
-        const view = new Node('View');
-        view.addComponent(UITransform);
-        view.setParent(this.node);
-        view.setPosition(0, 0, 0);
-        this._view = view;
-
-        const g = view.addComponent(Graphics);
-        const c = getColor(this.colorId);
-        g.fillColor = c;
-        g.circle(0, 0, CFG.ballRadius);
-        g.fill();
-        // 描边增强辨识度
-        g.strokeColor.set(20, 20, 30, 255);
-        g.lineWidth = 3;
-        g.circle(0, 0, CFG.ballRadius);
-        g.stroke();
-    }
-
-    private setupPhysics(): void {
-        const rb = this.node.addComponent(RigidBody2D);
+    private enablePhysics(token: number): void {
+        if (!this.isCurrent(token)) return;
+        const rb = this._rb;
+        const col = this._collider;
+        if (!rb || !col) return;
         rb.type = ERigidBody2DType.Dynamic;
+        rb.linearVelocity = new Vec2(0, 0);
+        rb.angularVelocity = 0;
         rb.gravityScale = 2;
-        // 允许旋转会让纯色圆看不出转动，但保留物理真实感
         rb.fixedRotation = false;
         rb.linearDamping = 0.05;
-        this._rb = rb;
-
-        const col = this.node.addComponent(CircleCollider2D);
         col.radius = CFG.ballRadius;
         col.density = CFG.ballDensity;
         col.friction = CFG.ballFriction;
         col.restitution = CFG.ballRestitution;
+        col.enabled = true;
+        rb.enabled = true;
         col.apply();
-        this._collider = col;
-
         this.state = BallState.Falling;
     }
 
-    /** 关闭物理，交由脚本接管位置（进入轨道时调用） */
     public disablePhysics(): void {
         if (this._rb) {
             this._rb.linearVelocity = new Vec2(0, 0);
             this._rb.angularVelocity = 0;
+            this._rb.gravityScale = 2;
             this._rb.enabled = false;
         }
         if (this._collider) this._collider.enabled = false;
         this.node.setRotationFromEuler(0, 0, 0);
     }
 
-    /** 吸附进入轨道槽位 */
     public enterTrack(slotIndex: number, targetPos: Vec3, onDone: () => void): void {
+        if (this._recycled) return;
+        const token = this._lifecycleToken;
         this.state = BallState.Entering;
         this.slotIndex = slotIndex;
         this.disablePhysics();
-
+        Tween.stopAllByTarget(this.node);
         tween(this.node)
             .to(CFG.enterDuration, { position: targetPos }, { easing: 'quadOut' })
             .call(() => {
+                if (!this.isCurrent(token)) return;
                 this.state = BallState.OnTrack;
                 onDone();
             })
             .start();
     }
 
-    /** 飞入收纳箱 */
     public flyToBox(targetPos: Vec3, onArrive: () => void): void {
+        if (this._recycled || this.state === BallState.Collecting) return;
+        const token = this._lifecycleToken;
         this.state = BallState.Collecting;
         this.slotIndex = -1;
-
+        this.disablePhysics();
+        Tween.stopAllByTarget(this.node);
         tween(this.node)
             .to(CFG.collectDuration, { position: targetPos }, { easing: 'sineIn' })
             .call(() => {
+                if (!this.isCurrent(token)) return;
                 this.state = BallState.Collected;
                 onArrive();
-                this.node.destroy();
+                if (this.isCurrent(token)) this.requestRecycle();
             })
             .start();
     }
 
-    /** 轨道上由 TrackSystem 每帧直接设置位置 */
+    /** Pool 回收前深度清理所有可跨生命周期的状态。 */
+    public resetForPool(): void {
+        this.stopAsyncWork();
+        this._lifecycleToken++;
+        this._recycled = true;
+        this._recycleHandler = null;
+        this.colorId = BallColor.Red;
+        this.state = BallState.InBlock;
+        this.slotIndex = -1;
+        this.waitTicket = 0;
+        this.disablePhysics();
+        this.node.setPosition(0, 0, 0);
+        this.node.setRotationFromEuler(0, 0, 0);
+        this.node.setScale(1, 1, 1);
+        this.resetViewTransform();
+        this.resetVisual(BallColor.Red);
+        this.node.active = false;
+    }
+
+    private resetViewTransform(): void {
+        if (!this._view) return;
+        this._view.active = true;
+        this._view.setPosition(0, 0, 0);
+        this._view.setRotationFromEuler(0, 0, 0);
+        this._view.setScale(1, 1, 1);
+    }
+
+    private resetVisual(color: BallColor): void {
+        if (this.ballSprite) {
+            this.ballSprite.enabled = true;
+            const c = getColor(color);
+            this.ballSprite.spriteFrame = BallVisuals.baseFrame;
+            this.ballSprite.color = new Color(c.r, c.g, c.b, 255);
+        }
+        const opacity = this._view?.getComponent(UIOpacity) ?? this.getComponent(UIOpacity);
+        if (opacity) opacity.opacity = 255;
+    }
+
+    private stopAsyncWork(): void {
+        this.unscheduleAllCallbacks();
+        Tween.stopAllByTarget(this.node);
+        if (this._view) Tween.stopAllByTarget(this._view);
+    }
+
+    private isCurrent(token: number): boolean {
+        return !this._recycled && token === this._lifecycleToken && this.node.isValid;
+    }
+
+    private requestRecycle(): void {
+        if (this._recycled) return;
+        const handler = this._recycleHandler;
+        if (handler) handler(this);
+        else console.error('[Ball] 生命周期结束但没有绑定 BallPool recycle handler。');
+    }
+
     public setTrackPosition(pos: Vec3): void {
-        this.node.setPosition(pos);
+        if (!this._recycled) this.node.setPosition(pos);
     }
 
     public isOnTrack(): boolean {
-        return this.state === BallState.OnTrack;
+        return !this._recycled && this.state === BallState.OnTrack;
     }
 
-    /** 是否处于可被轨道捕获的状态 */
     public isWaitable(): boolean {
-        return this.state === BallState.Falling || this.state === BallState.Waiting;
+        return !this._recycled
+            && (this.state === BallState.Falling || this.state === BallState.Waiting);
+    }
+
+    public get isRecycled(): boolean {
+        return this._recycled;
     }
 }

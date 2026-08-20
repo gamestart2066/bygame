@@ -37,6 +37,11 @@ export const SceneNames = {
     Game: 'Game',
 } as const;
 
+/** 通用 Prefab 文件名。路径统一由 ResPaths.prefab() 生成。 */
+export const PrefabNames = {
+    Ball: 'Ball',
+} as const;
+
 export const ResPaths = {
     /** 默认从哪个 Bundle 取资源 */
     defaultBundle: Bundles.play as string,

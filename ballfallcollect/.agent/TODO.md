@@ -5,16 +5,11 @@
 
 ---
 
-## P0 — 阻塞全局
-
-- [ ] **UI 实体化改造收尾**：`HallUI` 挂载后验证大厅流程（前 4 批均已验证通过）
-
----
-
 ## P1 — 关键路径
 
-- [ ] 根据运行反馈修 bug、调布局与手感
-- [ ] `ObjectPool` 对象池（球高频生成销毁，当前直接 `instantiate` / `destroy`）
+- [ ] 根据运行反馈完善功能细节、修 bug、调布局与操作手感
+- [ ] 完善核心流程的动画表现与操作反馈
+- [ ] 在 Cocos Creator 中完成 `Ball.prefab` 的 Ball 脚本与单一基础 SpriteFrame 绑定，实跑验证 BallPool 深度 reset、Slot 连续出球与 Scene/Restart 清理
 
 ---
 
@@ -22,8 +17,8 @@
 
 - [ ] 屏幕适配验证（多机型下 Widget 与安全区表现）
 - [ ] 关卡扩展：目前只有 `LevelTerrain_01` 一个地形，3 关全部复用它
-- [ ] UI 美术化：面板均为 `UIWidgets` 代码兜底版，待补 `play/ui/` 预制体
-- [ ] 资源目录 `play/ui`、`play/audio`、`play/texture` 按需创建（路径已在 `ResPaths` 预留）
+- [ ] UI 美术化：当前固定 UI 与 Popup Prefab 均为原型表现，待统一正式视觉风格
+- [ ] 资源目录 `play/audio`、`play/texture` 按需创建（路径已在 `ResPaths` 预留）
 - [ ] 修正 2 处过时代码注释（下次改到该文件时顺手改，不单独开工）：
       `game/VSlot.ts:24` 写「椭圆轨道」应为跑道形；`game/TerrainRoot.ts:75` 提到已不存在的 `test.scene`
 

@@ -92,7 +92,7 @@ assets/
 │  └─ scene/    SceneRouter · LoadingEntry · HallEntry · GameEntry
 └─ play/        ★ Bundle（isBundle=true，包名 "play"）
    ├─ map/      地形预制体
-   ├─ prefab/   ColorBlock.prefab · VSlot.prefab
+   ├─ prefab/   Ball.prefab · ColorBlock.prefab · VSlot.prefab
    └─ ui/       PauseUI.prefab · ResultUI.prefab（动态 Popup）
 ```
 
@@ -115,6 +115,18 @@ AI 看不到游戏画面：
 
 > **绝不猜测或伪造 UUID。** 无法可靠确定的引用一律留空，并逐项列出
 > 「在哪个 Scene/Prefab 的哪个节点上挂什么」交给用户在编辑器完成。
+
+### 3.4 任务交付清单（长期规则）
+
+每次完成开发任务，最终回复必须增加标题：
+
+```text
+# 我需要在 Cocos Creator 中做什么
+```
+
+- 明确列出用户必须手动完成的 Prefab、节点、Component、Property、资源/引用绑定和运行验证步骤。
+- 代码能安全完成的操作由 AI 完成，不把可自动完成的工作留给用户。
+- 若没有任何手动操作，明确写：`本次无需额外手动操作。`
 
 ---
 

@@ -174,6 +174,13 @@ SystemStatic(墙) → Track → BoxLayer → BallLayer → HUD
 | 失败判定带宽限 | 满槽且有球等待并持续累计 | 满槽是瞬时常态，无宽限会大量误判 |
 | 箱满后动画期不收球 | `_finished` 标志先置位 | 防止第 4 个球被收进已满的箱 |
 
+### 3.7 Ball 与 ColorBlock 的颜色资源规则
+
+- 不同 `BallColor` **不使用不同 SpriteFrame**；Ball 只使用一个基础球 `SpriteFrame`。
+- 颜色唯一映射为 `BallColor → GameTypes.getColor() → Sprite.color`。
+- 实际 Ball 与 `ColorBlock/Slots` 必须共享上述映射和同一个基础 SpriteFrame，禁止维护两套颜色表。
+- 不在 Inspector 中为每种颜色逐个绑定 SpriteFrame；未来确需不同帧时，优先通过代码和资源系统统一加载。
+
 ---
 
 ## 四、框架结构
@@ -225,7 +232,7 @@ Game    [GameEntry]    → 打开 HUD + 驱动 GameManager.startLevel()
 | 默认 Bundle | `ResPaths.defaultBundle = 'play'` |
 | 地形 | `ResPaths.terrain(name)` → `map/<name>` |
 | 通用预制体 | `ResPaths.prefab(name)` → `prefab/<name>` |
-| UI 预制体 | `ResPaths.ui(name)` → `ui/<name>`（**目录尚不存在**，属可选资源） |
+| UI 预制体 | `ResPaths.ui(name)` → `ui/<name>`（当前含 Pause / Result Popup Prefab） |
 
 `ResManager` 行为要点：
 
@@ -267,10 +274,11 @@ node .agent/check-code.mjs          # 默认扫 assets/scripts
 检查括号平衡 + **代码区全角标点**（中文输入法误打 `（` 会导致语法错误，已实际发生过）。
 ⚠️ **不能替代类型检查**。
 
-### 4.7 ⚠️ API 尚未经编译验证
+### 4.7 引擎 API 验证状态
 
 `temp/declarations/cc.d.ts` 是**占位文件**（297 B），真实声明在 Cocos 安装目录
-（工作目录之外），因此**本地无法做类型校验**。以下 API 首次编译时需重点确认：
+（工作目录之外），因此脱离 Creator 的本地脚本不能完成真实类型校验。
+当前版本已在 Cocos Creator 中实际运行，以下已用 API 已通过该 baseline 的编译与运行验证：
 
 `EPhysics2DDrawFlags`、`PhysicsSystem2D.instance.debugDrawFlags`、
 `Graphics.ellipse()`、`Graphics.roundRect()`、`BoxCollider2D.size = new Size()`、

@@ -5,10 +5,12 @@ import {
 import { BallColor, BallState, CFG, GameState } from '../core/GameTypes';
 import { EventBus, GameEvent, GameResultData } from '../core/EventBus';
 import { ResManager } from '../core/ResManager';
+import { PrefabNames, ResPaths } from '../core/ResPaths';
 import { buildLevelPlan, LevelDef, LevelPlan, resolveDifficulty } from '../config/LevelConfig';
 import { LevelManager } from '../config/LevelManager';
 import { LevelValidator } from '../config/LevelValidator';
 import { Ball } from './Ball';
+import { BallPool } from './BallPool';
 import { ColorBlock } from './ColorBlock';
 import { CollectBox } from './CollectBox';
 import { TrackSystem } from './TrackSystem';
@@ -50,6 +52,7 @@ export class GameManager extends Component {
     private _columns: CollectBox[][] = [];
     private _track: TrackSystem | null = null;
     private _balls: Ball[] = [];
+    private _ballPool: BallPool = new BallPool();
 
     private _terrainLayer: Node | null = null;
     private _boxLayer: Node | null = null;
@@ -70,6 +73,10 @@ export class GameManager extends Component {
     }
 
     protected onDestroy(): void {
+        this._state = GameState.Ready;
+        this.stopBlockReleases();
+        this.recycleAllBalls();
+        this._ballPool.dispose();
         EventBus.offTarget(this);
     }
 
@@ -91,6 +98,13 @@ export class GameManager extends Component {
         this.applyDifficulty(def);
         this.setupPhysics();
         this.buildLayers();
+
+        if (!this._ballLayer
+            || !await this._ballPool.init(ResPaths.prefab(PrefabNames.Ball), this._ballLayer)) {
+            const errors = ['Ball.prefab 加载或配置失败，关卡已阻止启动。'];
+            EventBus.emit(GameEvent.LevelValidateFailed, { levelId: def.levelId, errors });
+            return false;
+        }
 
         // 1. 取得地形（优先加载 Prefab，其次使用场景中已摆好的地形）
         const terrain = await this.resolveTerrain(def);
@@ -325,8 +339,8 @@ export class GameManager extends Component {
 
     // ==================== 事件 ====================
 
-    private onBallReleased(color: BallColor, fromWorldPos: Vec3, toWorldPos: Vec3): void {
-        if (this._state !== GameState.Playing || this._paused || !this._ballLayer) return;
+    private onBallReleased(color: BallColor, fromWorldPos: Vec3, toWorldPos: Vec3): boolean {
+        if (this._state !== GameState.Playing || this._paused || !this._ballLayer) return false;
 
         const fromLocal = this._ballLayerUI
             ? this._ballLayerUI.convertToNodeSpaceAR(fromWorldPos)
@@ -334,7 +348,10 @@ export class GameManager extends Component {
         const toLocal = this._ballLayerUI
             ? this._ballLayerUI.convertToNodeSpaceAR(toWorldPos)
             : toWorldPos;
-        this._balls.push(Ball.create(color, fromLocal, toLocal, this._ballLayer));
+        const ball = this._ballPool.get(color, fromLocal, toLocal, this._ballLayer);
+        if (!ball) return false;
+        this._balls.push(ball);
+        return true;
     }
 
     private onPause(): void {
@@ -361,7 +378,7 @@ export class GameManager extends Component {
     }
 
     private pruneBalls(): void {
-        this._balls = this._balls.filter((b) => b && b.isValid);
+        this._balls = this._balls.filter((b) => b && b.isValid && !b.isRecycled);
     }
 
     /** 入轨：捕获区内按先到先入，每帧最多放行一个 */
@@ -445,10 +462,7 @@ export class GameManager extends Component {
 
     private finish(win: boolean): void {
         this._state = win ? GameState.Win : GameState.Lose;
-
-        for (const b of this._blocks) {
-            if (b.isValid) b.node.off(Node.EventType.TOUCH_END);
-        }
+        this.stopBlockReleases();
 
         const data: GameResultData = {
             win,
@@ -460,6 +474,24 @@ export class GameManager extends Component {
         if (win && this._def) LevelManager.markCleared(this._def.levelId);
 
         EventBus.emit(win ? GameEvent.GameWin : GameEvent.GameLose, data);
+    }
+
+    private stopBlockReleases(): void {
+        for (const block of this._blocks) {
+            if (block?.isValid) block.stopRelease();
+        }
+    }
+
+    /** Scene 切换 / Restart 销毁 GameManager 时释放轨道槽并安全回收活动球。 */
+    private recycleAllBalls(): void {
+        for (const ball of this._balls) {
+            if (!ball?.isValid || ball.isRecycled) continue;
+            if (this._track?.isValid && ball.slotIndex >= 0) {
+                this._track.releaseSlot(ball.slotIndex);
+            }
+            this._ballPool.recycle(ball);
+        }
+        this._balls.length = 0;
     }
 
     private emitProgress(): void {

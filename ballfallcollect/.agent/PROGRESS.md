@@ -3,8 +3,10 @@
 > 只描述**当前状态**：现在处于哪个阶段、已经具备什么能力、卡在哪里。
 > 不记录逐次修改过程；待办见 `TODO.md`。
 
-**当前阶段**：🟢 全流程实跑通过 + **UI 已全部实体化**（编辑器中可见可调）
-　　　　　　　—— 仅剩 `HallUI` 挂载待验证
+**当前阶段**：🟢 **功能细节完善 + 动画表现 + 操作手感优化**
+
+当前最新版本（含 UI 实体化改造）已在 Cocos Creator 中实际运行，核心流程基本正常，
+可作为后续开发的可运行 baseline。
 
 ---
 
@@ -39,21 +41,23 @@
 
 - `play/map/LevelTerrain_01.prefab`：3 个 `ColorBlock` + 1 个 `VSlot`（内含 `EntranceGate`），根节点挂 `TerrainRoot`
 - `play/prefab/`：`ColorBlock.prefab` · `VSlot.prefab`
+- `play/ui/`：`PauseUI.prefab` · `ResultUI.prefab`
 
 ---
 
 ## ✅ 已验证的 baseline
 
-Loading → Hall → Game 全流程在 Cocos 编辑器中实跑通过，无报错。
-即：场景挂载、Bundle 加载、地形实例化、UI fallback 构建、关卡校验、场景路由**均已生效**，
-`TECH_NOTES.md` 4.7 列出的 API 也已通过编译。
+当前最新版本（包括 Loading / Hall / Game 固定 UI、Pause / Result Popup Prefab）已在
+Cocos Creator 中实际运行，核心流程基本正常。场景挂载、Bundle 加载、地形实例化、
+关卡校验、场景路由与核心玩法链路均已生效，可作为新的回退基准。
 
-## ❗ 当前阻塞
+## 当前重点
 
-| # | 阻塞 | 说明 |
-|---|---|---|
-| 1 | UI 实体化改造进行中 | 见 `TODO.md` P0；改造期间以上述 baseline 为回退基准 |
-| 2 | 手感与布局未调优 | 流程跑通 ≠ 手感可玩；V 槽 → 轨道入口的汇流稳定性仍需实际观察 |
+- 完善功能细节与异常边界
+- 增强动画表现与操作反馈
+- 持续调优地形布局、物理汇流和整体手感
+- Ball Prefab / BallPool / ColorBlock 实体 Slot 出球链路已编码，待 Creator 内完成资源绑定并实跑验证
+- 核心链路验证稳定后扩展关卡
 
 ---
 
@@ -64,5 +68,5 @@ Loading → Hall → Game 全流程在 Cocos 编辑器中实跑通过，无报�
 | M0 工程与记忆机制就绪 | ✅ |
 | M1 玩法确定 + 架构搭建 | ✅ |
 | M2 可玩原型（全流程跑通） | ✅ 已实跑验证 |
-| M3 完整玩法 + UI + 数值 | ⬜ |
+| M3 完整玩法 + UI + 数值 | 🟡 细节、表现与手感完善中 |
 | M4 打包上线 | ⬜ |

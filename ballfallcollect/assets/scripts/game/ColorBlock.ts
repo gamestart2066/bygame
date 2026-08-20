@@ -1,7 +1,8 @@
 import {
-    _decorator, Component, Node, Graphics, Sprite, UITransform, Vec3, Color, EventTouch,
+    _decorator, Component, Node, Sprite, UITransform, Vec3, Color, EventTouch,
 } from 'cc';
 import { BallColor, CFG, getColor } from '../core/GameTypes';
+import { BallVisuals } from './BallVisuals';
 
 const { ccclass, property } = _decorator;
 
@@ -28,11 +29,11 @@ export class ColorBlock extends Component {
     private _releasing: boolean = false;
     private _background: Node | null = null;
     private _bgSprite: Sprite | null = null;
-    private _dotNodes: Node[] = [];
-    private _dotGfx: Graphics[] = [];
+    private _slotNodes: Node[] = [];
+    private _slotSprites: Sprite[] = [];
     private _initialized: boolean = false;
     /** 释放一个球时的回调：(color, 起点=被释放槽位的世界坐标, 终点=出球点世界坐标) */
-    private _onRelease: ((color: BallColor, fromWorldPos: Vec3, toWorldPos: Vec3) => void) | null = null;
+    private _onRelease: ((color: BallColor, fromWorldPos: Vec3, toWorldPos: Vec3) => boolean) | null = null;
 
     /**
      * 由 GameManager 在扫描到本格子后调用，分配颜色并激活。
@@ -41,7 +42,7 @@ export class ColorBlock extends Component {
     public setup(
         color: BallColor,
         index: number,
-        onRelease: (color: BallColor, fromWorldPos: Vec3, toWorldPos: Vec3) => void
+        onRelease: (color: BallColor, fromWorldPos: Vec3, toWorldPos: Vec3) => boolean
     ): void {
         this.colorId = color;
         this.blockIndex = index;
@@ -57,10 +58,18 @@ export class ColorBlock extends Component {
         }
 
         const slots = this.node.getChildByPath('Slots');
-        this._dotNodes = slots ? slots.children.slice() : [];
-        this._dotGfx = this._dotNodes.map((n) => n.getComponent(Graphics) ?? n.addComponent(Graphics));
-        if (this._dotNodes.length === 0) {
-            console.warn('[ColorBlock] 未找到 Slots 分组节点或其为空，剩余球数指示点将不会绘制。');
+        this._slotNodes = slots ? slots.children.slice() : [];
+        this._slotSprites = this._slotNodes
+            .map((n) => n.getComponent(Sprite))
+            .filter((s): s is Sprite => !!s);
+        if (this._slotNodes.length < CFG.ballsPerBlock) {
+            console.error(
+                `[ColorBlock] Slots 只有 ${this._slotNodes.length} 个实体节点，` +
+                `少于 CFG.ballsPerBlock=${CFG.ballsPerBlock}；不会动态补建节点。`
+            );
+        }
+        if (this._slotSprites.length !== this._slotNodes.length) {
+            console.error('[ColorBlock] 部分 Slot 没有 Sprite 组件；不会动态补挂。');
         }
 
         this.redraw();
@@ -88,12 +97,20 @@ export class ColorBlock extends Component {
         }
 
         const releasedSlot = this.remaining - 1;
+        const spawned = this._onRelease?.(
+            this.colorId,
+            this.getSlotWorldPos(releasedSlot),
+            this.getSpawnWorldPos()
+        ) ?? false;
+        if (!spawned) {
+            // Pause / GameOver / Pool 未就绪时保持 Slot 可见，不产生视觉与逻辑脱节。
+            this._releasing = false;
+            return;
+        }
+
+        // Ball 已在同一世界坐标激活后，才同步扣减并隐藏对应 Slot。
         this.remaining--;
         this.redraw();
-
-        if (this._onRelease) {
-            this._onRelease(this.colorId, this.getSlotWorldPos(releasedSlot), this.getSpawnWorldPos());
-        }
 
         if (this.remaining > 0) {
             this.scheduleOnce(() => this.releaseOne(), CFG.releaseInterval);
@@ -110,7 +127,9 @@ export class ColorBlock extends Component {
      * 配合 getSpawnWorldPos() 形成「从格子飞到出生点」的视觉效果。
      */
     public getSlotWorldPos(index: number): Vec3 {
-        const node = this._dotNodes[index];
+        const node = this._slotNodes[index];
+        const ui = node?.getComponent(UITransform);
+        if (ui) return ui.convertToWorldSpaceAR(new Vec3(0, 0, 0));
         if (node) return node.worldPosition.clone();
         return this.getBlockWorldPos();
     }
@@ -121,9 +140,10 @@ export class ColorBlock extends Component {
         const h = ui ? ui.contentSize.height : CFG.blockHeight;
         const anchorY = ui ? ui.anchorY : 0.5;
 
-        const world = this.node.worldPosition.clone();
-        world.y -= anchorY * h;
-        return world;
+        const anchorX = ui ? ui.anchorX : 0.5;
+        return ui
+            ? ui.convertToWorldSpaceAR(new Vec3((0.5 - anchorX) * ui.contentSize.width, -anchorY * h, 0))
+            : this.node.worldPosition.clone();
     }
 
     /**
@@ -135,12 +155,13 @@ export class ColorBlock extends Component {
         const h = ui ? ui.contentSize.height : CFG.blockHeight;
         const anchorY = ui ? ui.anchorY : 0.5;
 
-        const world = this.node.worldPosition.clone();
-        // 节点原点到底边的距离
-        world.y -= anchorY * h;
-        world.y -= CFG.ballRadius + 2;
-        // 轻微抖动，避免多球完全重叠
-        world.x += (Math.random() - 0.5) * 16;
+        const anchorX = ui ? ui.anchorX : 0.5;
+        const local = new Vec3(
+            (ui ? (0.5 - anchorX) * ui.contentSize.width : 0) + (Math.random() - 0.5) * 16,
+            -anchorY * h - CFG.ballRadius - 2,
+            0
+        );
+        const world = ui ? ui.convertToWorldSpaceAR(local) : this.node.worldPosition.clone();
         return world;
     }
 
@@ -152,7 +173,7 @@ export class ColorBlock extends Component {
         return this._initialized;
     }
 
-    /** 绘制格子：背景与九点指示都只读取各自子节点的 UITransform，不计算坐标 */
+    /** 更新格子：只使用 Prefab 中已有的 Background 与 Slot Sprite。 */
     private redraw(): void {
         this.redrawBackground();
         this.redrawDots();
@@ -169,27 +190,29 @@ export class ColorBlock extends Component {
             : new Color(base.r, base.g, base.b, this._bgSprite.color.a);
     }
 
-    /** 剩余球数指示：每个槽位节点的位置/直径都来自其自身 UITransform */
+    /** Slot Sprite 就是格子内尚未释放的球；SpriteFrame 与实际 Ball 共用 BallVisuals。 */
     private redrawDots(): void {
         const base = getColor(this.colorId);
-        for (let i = 0; i < this._dotNodes.length; i++) {
-            const g = this._dotGfx[i];
-            if (!g) continue;
-            g.clear();
-            if (i >= this.remaining) continue;
-
-            const ui = this._dotNodes[i].getComponent(UITransform);
-            const w = ui ? ui.contentSize.width : CFG.blockWidth / 5;
-            const h = ui ? ui.contentSize.height : CFG.blockHeight / 5;
-            const r = Math.min(w, h) / 2;
-
-            g.fillColor = base;
-            g.circle(0, 0, r);
-            g.fill();
+        for (let i = 0; i < this._slotNodes.length; i++) {
+            const visible = i < this.remaining;
+            this._slotNodes[i].active = visible;
+            const sprite = this._slotNodes[i].getComponent(Sprite);
+            if (sprite) {
+                sprite.spriteFrame = BallVisuals.baseFrame;
+                sprite.color = new Color(base.r, base.g, base.b, 255);
+            }
         }
     }
 
-    protected onDestroy(): void {
+    /** 胜负、Restart 或销毁前取消尚未执行的逐球释放。 */
+    public stopRelease(): void {
+        this.unscheduleAllCallbacks();
+        this._releasing = false;
+        this._onRelease = null;
         this.node.off(Node.EventType.TOUCH_END, this.onTouch, this);
+    }
+
+    protected onDestroy(): void {
+        this.stopRelease();
     }
 }

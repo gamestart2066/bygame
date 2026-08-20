@@ -1,7 +1,7 @@
 import { _decorator, Component, Prefab } from 'cc';
 import { EventBus, GameEvent } from '../core/EventBus';
 import { ResManager } from '../core/ResManager';
-import { ResPaths, SceneNames, UIPrefabs } from '../core/ResPaths';
+import { PrefabNames, ResPaths, SceneNames, UIPrefabs } from '../core/ResPaths';
 import { LevelManager } from '../config/LevelManager';
 import { UIManager } from '../ui/UIManager';
 import { SceneRouter } from './SceneRouter';
@@ -82,6 +82,9 @@ export class LoadingEntry extends Component {
         // 当前关卡地形：必需
         const terrain = LevelManager.terrainPath();
         if (terrain) items.push({ path: terrain, type: Prefab });
+
+        // 正式 Ball 的唯一来源：必需资源，缺失时 GameManager 会明确阻止开局。
+        items.push({ path: ResPaths.prefab(PrefabNames.Ball), type: Prefab });
 
         // UI 面板预制体：可选（play/ui 目录尚未创建，缺失时 UIManager 用代码兜底）
         for (const key of Object.keys(UIPrefabs) as Array<keyof typeof UIPrefabs>) {
