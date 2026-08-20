@@ -29,42 +29,52 @@ export class Ball extends Component {
     /** 视觉子节点（只承载 Graphics，与物理解耦） */
     private _view: Node | null = null;
 
-    /** 工厂方法：创建一个带图形与物理的小球节点 */
-    public static create(color: BallColor, pos: Vec3, parent: Node): Ball {
+    /**
+     * 工厂方法：创建一个小球节点，先从格子飞到出生点（由小变大），落地后再启用物理。
+     * @param fromPos 起点（格子底边，视觉出生位置）
+     * @param toPos 终点（V 槽上方的真正出生点，落地后开始物理下落）
+     */
+    public static create(color: BallColor, fromPos: Vec3, toPos: Vec3, parent: Node): Ball {
         const node = new Node('Ball');
         node.addComponent(UITransform);
         node.setParent(parent);
-        node.setPosition(pos);
+        node.setPosition(fromPos);
 
         const ball = node.addComponent(Ball);
         ball.colorId = color;
         ball.draw();
-        ball.setupPhysics();
-        ball.playSpawnAnim();
+        ball.playSpawnFlight(toPos, () => ball.setupPhysics());
         return ball;
     }
 
     /**
-     * 出生动画：从格子里放出来时由小变大。
+     * 出生飞行动画：从格子飞到出生点，飞行途中由小变大；到达后才启用物理。
      *
      * 只对 View 子节点做 scale 补间，根节点（刚体 + 碰撞体）始终是 1 倍，
-     * 因此不会影响碰撞半径、堆叠与汇流。
+     * 因此不会影响碰撞半径、堆叠与汇流。飞行期间未挂物理组件，纯 Tween 驱动。
      */
-    private playSpawnAnim(): void {
+    private playSpawnFlight(toPos: Vec3, onArrive: () => void): void {
         const view = this._view;
-        if (!view) return;
-
         const from = CFG.ballSpawnScaleFrom;
-        if (from >= 1 || CFG.ballSpawnDuration <= 0) return;
+        const duration = CFG.ballSpawnDuration;
 
-        view.setScale(from, from, 1);
-        tween(view)
-            .to(
-                CFG.ballSpawnDuration,
-                { scale: new Vec3(1, 1, 1) },
-                { easing: 'backOut' }
-            )
+        if (duration <= 0) {
+            this.node.setPosition(toPos);
+            onArrive();
+            return;
+        }
+
+        tween(this.node)
+            .to(duration, { position: toPos }, { easing: 'quadOut' })
+            .call(onArrive)
             .start();
+
+        if (view && from < 1) {
+            view.setScale(from, from, 1);
+            tween(view)
+                .to(duration, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
+                .start();
+        }
     }
 
     /**

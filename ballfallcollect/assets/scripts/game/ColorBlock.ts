@@ -26,10 +26,13 @@ export class ColorBlock extends Component {
     public remaining: number = CFG.ballsPerBlock;
 
     private _releasing: boolean = false;
-    private _graphics: Graphics | null = null;
+    private _background: Node | null = null;
+    private _bgSprite: Sprite | null = null;
+    private _dotNodes: Node[] = [];
+    private _dotGfx: Graphics[] = [];
     private _initialized: boolean = false;
-    /** 释放一个球时的回调：(color, 出球点世界坐标) */
-    private _onRelease: ((color: BallColor, worldPos: Vec3) => void) | null = null;
+    /** 释放一个球时的回调：(color, 起点=被释放槽位的世界坐标, 终点=出球点世界坐标) */
+    private _onRelease: ((color: BallColor, fromWorldPos: Vec3, toWorldPos: Vec3) => void) | null = null;
 
     /**
      * 由 GameManager 在扫描到本格子后调用，分配颜色并激活。
@@ -38,7 +41,7 @@ export class ColorBlock extends Component {
     public setup(
         color: BallColor,
         index: number,
-        onRelease: (color: BallColor, worldPos: Vec3) => void
+        onRelease: (color: BallColor, fromWorldPos: Vec3, toWorldPos: Vec3) => void
     ): void {
         this.colorId = color;
         this.blockIndex = index;
@@ -46,7 +49,20 @@ export class ColorBlock extends Component {
         this._onRelease = onRelease;
         this._initialized = true;
 
-        this._graphics = this.getComponent(Graphics) ?? this.addComponent(Graphics);
+        this._background = this.node.getChildByPath('Background');
+        if (this._background) {
+            this._bgSprite = this._background.getComponent(Sprite) ?? this._background.addComponent(Sprite);
+        } else {
+            console.warn('[ColorBlock] 未找到 Background 子节点，背景将不会染色。');
+        }
+
+        const slots = this.node.getChildByPath('Slots');
+        this._dotNodes = slots ? slots.children.slice() : [];
+        this._dotGfx = this._dotNodes.map((n) => n.getComponent(Graphics) ?? n.addComponent(Graphics));
+        if (this._dotNodes.length === 0) {
+            console.warn('[ColorBlock] 未找到 Slots 分组节点或其为空，剩余球数指示点将不会绘制。');
+        }
+
         this.redraw();
 
         this.node.off(Node.EventType.TOUCH_END, this.onTouch, this);
@@ -71,11 +87,12 @@ export class ColorBlock extends Component {
             return;
         }
 
+        const releasedSlot = this.remaining - 1;
         this.remaining--;
         this.redraw();
 
         if (this._onRelease) {
-            this._onRelease(this.colorId, this.getSpawnWorldPos());
+            this._onRelease(this.colorId, this.getSlotWorldPos(releasedSlot), this.getSpawnWorldPos());
         }
 
         if (this.remaining > 0) {
@@ -84,6 +101,29 @@ export class ColorBlock extends Component {
             this._releasing = false;
             this.redraw();
         }
+    }
+
+    /**
+     * 出生飞行起点（世界坐标）：被释放的那个槽位指示点的世界坐标。
+     * 用真实的 SlotN 节点位置而非格子整体的通用锚点，
+     * 这样球才会看起来是从「原本显示的那个点」飞出去，而不是从格子底边的固定点飞出。
+     * 配合 getSpawnWorldPos() 形成「从格子飞到出生点」的视觉效果。
+     */
+    public getSlotWorldPos(index: number): Vec3 {
+        const node = this._dotNodes[index];
+        if (node) return node.worldPosition.clone();
+        return this.getBlockWorldPos();
+    }
+
+    /** 兜底：槽位节点缺失时退回格子底边中心（本节点自身 UITransform 计算） */
+    private getBlockWorldPos(): Vec3 {
+        const ui = this.getComponent(UITransform);
+        const h = ui ? ui.contentSize.height : CFG.blockHeight;
+        const anchorY = ui ? ui.anchorY : 0.5;
+
+        const world = this.node.worldPosition.clone();
+        world.y -= anchorY * h;
+        return world;
     }
 
     /**
@@ -112,52 +152,39 @@ export class ColorBlock extends Component {
         return this._initialized;
     }
 
-    /** 绘制格子：按节点实际尺寸自适应，不反向修改节点布局 */
+    /** 绘制格子：背景与九点指示都只读取各自子节点的 UITransform，不计算坐标 */
     private redraw(): void {
-        const g = this._graphics;
-        if (!g) return;
-        g.clear();
+        this.redrawBackground();
+        this.redrawDots();
+    }
 
-        const ui = this.getComponent(UITransform);
-        const w = ui ? ui.contentSize.width : CFG.blockWidth;
-        const h = ui ? ui.contentSize.height : CFG.blockHeight;
-        const left = ui ? -ui.anchorX * w : -w / 2;
-        const bottom = ui ? -ui.anchorY * h : -h / 2;
+    /** 背景染色：直接设置 Background 节点上 Sprite 的颜色，不再用 Graphics 计算绘制 */
+    private redrawBackground(): void {
+        if (!this._bgSprite) return;
 
         const empty = this.isEmpty();
         const base = getColor(this.colorId);
+        this._bgSprite.color = empty
+            ? new Color(base.r * 0.35, base.g * 0.35, base.b * 0.35, this._bgSprite.color.a)
+            : new Color(base.r, base.g, base.b, this._bgSprite.color.a);
+    }
 
-        // 若用户在 Prefab 里放了 Sprite，则同步染色（美术可自行替换外观）
-        const sprite = this.getComponent(Sprite);
-        if (sprite) {
-            sprite.color = empty
-                ? new Color(base.r * 0.35, base.g * 0.35, base.b * 0.35, 255)
-                : base;
-        }
+    /** 剩余球数指示：每个槽位节点的位置/直径都来自其自身 UITransform */
+    private redrawDots(): void {
+        const base = getColor(this.colorId);
+        for (let i = 0; i < this._dotNodes.length; i++) {
+            const g = this._dotGfx[i];
+            if (!g) continue;
+            g.clear();
+            if (i >= this.remaining) continue;
 
-        // 背板
-        g.fillColor = empty
-            ? new Color(base.r * 0.25, base.g * 0.25, base.b * 0.25, 255)
-            : new Color(base.r * 0.45, base.g * 0.45, base.b * 0.45, 255);
-        g.roundRect(left, bottom, w, h, 12);
-        g.fill();
+            const ui = this._dotNodes[i].getComponent(UITransform);
+            const w = ui ? ui.contentSize.width : CFG.blockWidth / 5;
+            const h = ui ? ui.contentSize.height : CFG.blockHeight / 5;
+            const r = Math.min(w, h) / 2;
 
-        // 边框
-        g.lineWidth = 4;
-        g.strokeColor = empty ? new Color(90, 90, 100, 255) : base;
-        g.roundRect(left, bottom, w, h, 12);
-        g.stroke();
-
-        // 剩余球数：3×3 点阵，按节点尺寸自适应
-        const cx = left + w / 2;
-        const cy = bottom + h / 2;
-        const gap = Math.min(w, h) / 3.4;
-        const r = gap * 0.36;
-        g.fillColor = base;
-        for (let i = 0; i < this.remaining; i++) {
-            const row = Math.floor(i / 3);
-            const col = i % 3;
-            g.circle(cx + (col - 1) * gap, cy + (1 - row) * gap, r);
+            g.fillColor = base;
+            g.circle(0, 0, r);
             g.fill();
         }
     }

@@ -220,7 +220,7 @@ export class GameManager extends Component {
         for (let i = 0; i < this._blocks.length; i++) {
             const block = this._blocks[i];
             const color = plan.blockColors[i];
-            block.setup(color, i, (c, worldPos) => this.onBallReleased(c, worldPos));
+            block.setup(color, i, (c, fromPos, toPos) => this.onBallReleased(c, fromPos, toPos));
         }
     }
 
@@ -325,13 +325,16 @@ export class GameManager extends Component {
 
     // ==================== 事件 ====================
 
-    private onBallReleased(color: BallColor, worldPos: Vec3): void {
+    private onBallReleased(color: BallColor, fromWorldPos: Vec3, toWorldPos: Vec3): void {
         if (this._state !== GameState.Playing || this._paused || !this._ballLayer) return;
 
-        const local = this._ballLayerUI
-            ? this._ballLayerUI.convertToNodeSpaceAR(worldPos)
-            : worldPos;
-        this._balls.push(Ball.create(color, local, this._ballLayer));
+        const fromLocal = this._ballLayerUI
+            ? this._ballLayerUI.convertToNodeSpaceAR(fromWorldPos)
+            : fromWorldPos;
+        const toLocal = this._ballLayerUI
+            ? this._ballLayerUI.convertToNodeSpaceAR(toWorldPos)
+            : toWorldPos;
+        this._balls.push(Ball.create(color, fromLocal, toLocal, this._ballLayer));
     }
 
     private onPause(): void {
