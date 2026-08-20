@@ -59,17 +59,17 @@ export enum GameState {
 export const CFG = {
     /** ---- 小球 ---- */
     ballRadius: 18,
+    /** 真实 Ball 的标准视觉倍率；只作用于 Ball/Sprite，Root/Collider 始终 1 倍 */
+    ballVisualScale: 2.0,
     ballDensity: 1,
     ballFriction: 0.35,
     ballRestitution: 0.15,
+    /** 真实 Ball 出现并启用物理瞬间的初速度（px/s） */
+    ballInitialVelocityX: 0,
+    ballInitialVelocityY: -10,
+    /** 进入关卡、允许操作前预先创建的 Ball 数量 */
+    ballPoolPrewarmCount: 18,
 
-    /**
-     * 小球出生缩放动画（点击格子放球时由小变大）。
-     * 只作用于 Ball 的 View 子节点，**不会缩放碰撞体**。
-     * `ballSpawnScaleFrom` 设为 1 即可关闭该效果。
-     */
-    ballSpawnScaleFrom: 0.2,
-    ballSpawnDuration: 0.18,
     /** 世界重力（仅 Y） */
     gravityY: -900,
 
@@ -80,7 +80,14 @@ export const CFG = {
     blockWidth: 190,
     blockHeight: 190,
     /** 点击后逐球释放的间隔（秒），避免同帧重叠穿透 */
-    releaseInterval: 0.12,
+    releaseInterval: 0.028,
+    /** Slot 展示球释放动画：在各自原位先上抬，再下落并放大 */
+    slotReleaseLiftDistance: 15,
+    slotReleaseDropDistance: 26,
+    /** 左右列展示球沿各自外侧偏移；中列保持竖直 */
+    slotReleaseOutwardDistance: 24,
+    /** 完整前置 Tween 时长；结束后才允许生成真实 Ball */
+    slotReleaseDuration: 0.2,
     ballsPerBlock: 9,
 
     /* ---- V 型槽 / 汇流斜板参数已移除 ----
@@ -110,7 +117,9 @@ export const CFG = {
     /** 固定离散槽位数量（已确定规则：24），按**路径弧长**均匀分布 */
     trackSlotCount: 24,
     /** 轨道线速度（像素/秒，沿路径），正值顺时针 */
-    trackSpeed: 150,
+    trackSpeed: 180,
+    /** 本关所有 ColorBlock 都已点击后，轨道相对当前关卡基础速度的倍率 */
+    trackAllBlocksClickedMultiplier: 2,
     /** 绘制轨道时的采样段数（与逻辑同用一套路径函数，保证一致） */
     trackDrawSegments: 96,
     /** 入口捕获区尺寸；中心运行时取 EntranceGate 位置 */
@@ -131,10 +140,10 @@ export const CFG = {
     boxY: -430,
     /** 固定列数 */
     boxColumnCount: 4,
-    /** 列间水平间隙 */
-    boxColumnGap: 8,
-    /** 行间距 */
-    boxRowGap: 10,
+    /** 相邻列中心点的 X 间距，应略大于 boxWidth */
+    boxColumnSpacing: 125,
+    /** 相邻行中心点的 Y 间距，应略大于 boxHeight */
+    boxRowSpacing: 80,
     /** 每列最多显示几行，超出的箱子隐藏（避免堆到屏幕外） */
     boxMaxVisibleRows: 3,
     /** 列内向上补位的平移动画时长 */
@@ -154,6 +163,7 @@ export const CFG = {
     /** ---- 失败判定 ---- */
     /** 满槽且入口有球等待，持续该秒数才判负（防瞬时误判） */
     loseGraceTime: 1.5,
+
 };
 
 /** 物理分组（第一版全部使用默认分组，此处预留） */

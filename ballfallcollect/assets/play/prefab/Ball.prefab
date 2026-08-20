@@ -283,14 +283,14 @@
     "_group": 1,
     "_density": 1,
     "_sensor": false,
-    "_friction": 0.35,
+    "_friction": 0,
     "_restitution": 0.15,
     "_offset": {
       "__type__": "cc.Vec2",
       "x": 0,
       "y": 0
     },
-    "_radius": 18,
+    "_radius": 13,
     "_id": ""
   },
   {
@@ -312,7 +312,6 @@
     "ballSprite": {
       "__id__": 5
     },
-    "colorSpriteFrames": [],
     "_id": ""
   },
   {

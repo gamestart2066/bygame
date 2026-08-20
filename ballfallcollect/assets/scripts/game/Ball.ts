@@ -20,6 +20,8 @@ export class Ball extends Component {
 
     private _rb: RigidBody2D | null = null;
     private _collider: CircleCollider2D | null = null;
+    /** Ball.prefab 上序列化的原始碰撞半径；首次缓存后不再被运行时值覆盖。 */
+    private _baseColliderRadius: number = -1;
     private _view: Node | null = null;
     private _recycled: boolean = true;
     private _lifecycleToken: number = 0;
@@ -46,8 +48,7 @@ export class Ball extends Component {
     /** 从 Pool 取出后开始一个等价于全新实例的生命周期。 */
     public activate(
         color: BallColor,
-        fromPos: Vec3,
-        toPos: Vec3,
+        spawnPos: Vec3,
         parent: Node,
         recycleHandler: (ball: Ball) => void
     ): boolean {
@@ -64,46 +65,27 @@ export class Ball extends Component {
 
         this.node.setParent(parent);
         this.node.active = true;
-        this.node.setPosition(fromPos);
+        this.node.setPosition(spawnPos);
         this.node.setRotationFromEuler(0, 0, 0);
+        // Root 承载物理组件，永远保持 1 倍；视觉尺寸只由 Sprite 子节点控制。
         this.node.setScale(1, 1, 1);
         this.resetViewTransform();
         this.resetVisual(color);
         this.disablePhysics();
-        this.playSpawnFlight(toPos, token);
+        this.enablePhysics(token);
         return true;
     }
 
     private cachePrefabParts(): void {
         this._rb = this.getComponent(RigidBody2D);
         this._collider = this.getComponent(CircleCollider2D);
+        if (this._collider && this._baseColliderRadius < 0) {
+            this._baseColliderRadius = this._collider.radius;
+        }
         this._view = this.node.getChildByName('Sprite');
         this.ballSprite = this.ballSprite
             ?? this._view?.getComponent(Sprite)
             ?? this.getComponentInChildren(Sprite);
-    }
-
-    private playSpawnFlight(toPos: Vec3, token: number): void {
-        const view = this._view;
-        const fromScale = CFG.ballSpawnScaleFrom;
-        const duration = CFG.ballSpawnDuration;
-        if (view) view.setScale(fromScale, fromScale, 1);
-
-        if (duration <= 0) {
-            this.node.setPosition(toPos);
-            if (view) view.setScale(1, 1, 1);
-            this.enablePhysics(token);
-            return;
-        }
-        tween(this.node)
-            .to(duration, { position: toPos }, { easing: 'quadOut' })
-            .call(() => this.enablePhysics(token))
-            .start();
-        if (view) {
-            tween(view)
-                .to(duration, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
-                .start();
-        }
     }
 
     private enablePhysics(token: number): void {
@@ -112,12 +94,17 @@ export class Ball extends Component {
         const col = this._collider;
         if (!rb || !col) return;
         rb.type = ERigidBody2DType.Dynamic;
-        rb.linearVelocity = new Vec2(0, 0);
+        rb.linearVelocity = new Vec2(
+            CFG.ballInitialVelocityX,
+            CFG.ballInitialVelocityY
+        );
         rb.angularVelocity = 0;
         rb.gravityScale = 2;
         rb.fixedRotation = false;
         rb.linearDamping = 0.05;
-        col.radius = CFG.ballRadius;
+        // Prefab 中 Sprite/Collider 是基准尺寸；真实 Ball 视觉放大后，
+        // 在启用物理的同一时机显式同步碰撞半径，不依赖 Root scale。
+        col.radius = this._baseColliderRadius * CFG.ballVisualScale;
         col.density = CFG.ballDensity;
         col.friction = CFG.ballFriction;
         col.restitution = CFG.ballRestitution;
@@ -184,6 +171,9 @@ export class Ball extends Component {
         this.slotIndex = -1;
         this.waitTicket = 0;
         this.disablePhysics();
+        if (this._collider && this._baseColliderRadius >= 0) {
+            this._collider.radius = this._baseColliderRadius;
+        }
         this.node.setPosition(0, 0, 0);
         this.node.setRotationFromEuler(0, 0, 0);
         this.node.setScale(1, 1, 1);
@@ -197,7 +187,7 @@ export class Ball extends Component {
         this._view.active = true;
         this._view.setPosition(0, 0, 0);
         this._view.setRotationFromEuler(0, 0, 0);
-        this._view.setScale(1, 1, 1);
+        this._view.setScale(CFG.ballVisualScale, CFG.ballVisualScale, 1);
     }
 
     private resetVisual(color: BallColor): void {

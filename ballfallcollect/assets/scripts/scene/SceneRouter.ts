@@ -47,8 +47,9 @@ export class SceneRouter {
         }
         this._switching = true;
 
-        // 清理：UI 面板 + 全局事件（新场景会重新 init / 重新注册）
-        UIManager.closeAll();
+        // Scene 是其全部 UI 节点的最终 owner；这里只释放管理器引用，
+        // 不在 loadScene 前手动 destroy，避免与场景 teardown 重复销毁。
+        UIManager.releaseForSceneSwitch();
         EventBus.clear();
 
         return new Promise<boolean>((resolve) => {

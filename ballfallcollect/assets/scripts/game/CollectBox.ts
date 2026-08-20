@@ -1,7 +1,9 @@
 import {
-    _decorator, Component, Node, Graphics, UITransform, Vec3, Color, tween, Tween,
+    _decorator, Component, Node, Vec3, Color, tween, Tween,
+    Prefab, Sprite, instantiate,
 } from 'cc';
 import { BallColor, CFG, getColor } from '../core/GameTypes';
+import { BallVisuals } from './BallVisuals';
 
 const { ccclass } = _decorator;
 
@@ -31,29 +33,75 @@ export class CollectBox extends Component {
     private _finished: boolean = false;
     /** 是否处于第一行（唯一允许收球的行） */
     private _collectable: boolean = false;
-    private _graphics: Graphics | null = null;
+    /** 补位 Tween 完成前为 false；首排箱子也不能在移动中收球。 */
+    private _inPosition: boolean = false;
+    /** 已锁定目标槽、但小球尚未飞到的数量。 */
+    private _reserved: number = 0;
+    private _boxSprite: Sprite | null = null;
+    private _slots: Node[] = [];
+    private _slotTargets: Node[] = [];
+    private _slotSprites: Sprite[] = [];
     private _onFinished: ((box: CollectBox) => void) | null = null;
 
-    public static create(
+    public static createFromPrefab(
+        prefab: Prefab,
         color: BallColor,
         index: number,
         pos: Vec3,
         parent: Node,
         onFinished: (box: CollectBox) => void
-    ): CollectBox {
-        const node = new Node(`Box_${index}`);
-        const ui = node.addComponent(UITransform);
-        ui.setContentSize(CFG.boxWidth, CFG.boxHeight);
+    ): CollectBox | null {
+        const node = instantiate(prefab);
+        const box = node.getComponent(CollectBox);
+        if (!box) {
+            console.error('[CollectBox] CollectBox.prefab 根节点未挂 CollectBox 脚本。');
+            node.destroy();
+            return null;
+        }
+        if (!box.initializePrefabNodes()) {
+            node.destroy();
+            return null;
+        }
+        node.name = `Box_${index}`;
         node.setParent(parent);
         node.setPosition(pos);
-
-        const box = node.addComponent(CollectBox);
         box.colorId = color;
         box.boxIndex = index;
         box._onFinished = onFinished;
-        box._graphics = node.addComponent(Graphics);
         box.redraw();
         return box;
+    }
+
+    private initializePrefabNodes(): boolean {
+        this._boxSprite = this.getComponent(Sprite);
+        if (!this._boxSprite) {
+            console.error('[CollectBox] CollectBox.prefab 根节点必须提供 Sprite 组件。');
+            return false;
+        }
+        const slotsRoot = this.node.getChildByName('Slots');
+        this._slots = slotsRoot ? slotsRoot.children.slice() : [];
+        if (this._slots.length !== CFG.boxCapacity) {
+            console.error(
+                `[CollectBox] CollectBox.prefab/Slots 必须恰好有 ${CFG.boxCapacity} 个槽节点，` +
+                `当前为 ${this._slots.length}。`
+            );
+            return false;
+        }
+        this._slotTargets = [];
+        this._slotSprites = [];
+        for (const slot of this._slots) {
+            const visual = slot.getChildByName('BallVisual');
+            const sprite = visual?.getComponent(Sprite) ?? null;
+            if (!visual || !sprite) {
+                console.error(
+                    `[CollectBox] ${slot.name} 必须包含名为 BallVisual 且带 Sprite 的子节点。`
+                );
+                return false;
+            }
+            this._slotTargets.push(visual);
+            this._slotSprites.push(sprite);
+        }
+        return true;
     }
 
     /**
@@ -63,8 +111,9 @@ export class CollectBox extends Component {
      */
     public canAccept(color: BallColor): boolean {
         return this._collectable
+            && this._inPosition
             && !this._finished
-            && this.count < CFG.boxCapacity
+            && this.count + this._reserved < CFG.boxCapacity
             && color === this.colorId;
     }
 
@@ -88,18 +137,34 @@ export class CollectBox extends Component {
         if (this._finished) return;
 
         Tween.stopAllByTarget(this.node);
+        this._inPosition = false;
         if (!animated) {
             this.node.setPosition(target);
+            this._inPosition = true;
             return;
         }
         tween(this.node)
             .to(CFG.boxMoveDuration, { position: target }, { easing: 'quadOut' })
+            .call(() => {
+                if (!this._finished && this.node.isValid) this._inPosition = true;
+            })
             .start();
+    }
+
+    /** 锁定下一空槽，并返回该槽的世界坐标；同帧多球不会取得同一个槽。 */
+    public reserveNextSlot(color: BallColor): Vec3 | null {
+        if (!this.canAccept(color)) return null;
+        const index = this.count + this._reserved;
+        const slot = this._slotTargets[index];
+        if (!slot?.isValid) return null;
+        this._reserved++;
+        return slot.worldPosition.clone();
     }
 
     /** 收下一个球（由 GameManager 在球飞入到位后调用） */
     public addBall(): void {
         if (this._finished) return;
+        if (this._reserved > 0) this._reserved--;
         this.count++;
         this.redraw();
 
@@ -126,49 +191,20 @@ export class CollectBox extends Component {
         return this._finished;
     }
 
-    /**
-     * 绘制箱体 + 3 个收纳槽指示。
-     * 等待中的箱子（非第一行）整体变暗，便于玩家区分哪一行能收球。
-     */
+    /** 用 Prefab 根 Sprite 表现箱体颜色；等待箱整体变暗。 */
     private redraw(): void {
-        const g = this._graphics;
-        if (!g) return;
-        g.clear();
-
-        const w = CFG.boxWidth;
-        const h = CFG.boxHeight;
         const base = getColor(this.colorId);
-        // 等待态压暗
         const dim = this._collectable ? 1 : 0.4;
-        const edge = new Color(base.r * dim, base.g * dim, base.b * dim, 255);
+        if (this._boxSprite) {
+            this._boxSprite.color = new Color(base.r * dim, base.g * dim, base.b * dim, 255);
+        }
 
-        // 箱体背板
-        g.fillColor = new Color(base.r * 0.3 * dim, base.g * 0.3 * dim, base.b * 0.3 * dim, 255);
-        g.roundRect(-w / 2, -h / 2, w, h, 10);
-        g.fill();
-
-        // 边框（颜色标识）：第一行用实色描边并加粗，等待行用暗色细边
-        g.lineWidth = this._collectable ? 6 : 3;
-        g.strokeColor = edge;
-        g.roundRect(-w / 2, -h / 2, w, h, 10);
-        g.stroke();
-
-        // 3 个收纳槽：已收满色，未收空心
-        const r = 14;
-        const gap = 32;
-        for (let i = 0; i < CFG.boxCapacity; i++) {
-            const x = (i - 1) * gap;
-            const y = -h * 0.18;
-            if (i < this.count) {
-                g.fillColor = edge;
-                g.circle(x, y, r);
-                g.fill();
-            } else {
-                g.lineWidth = 2;
-                g.strokeColor = new Color(200 * dim, 200 * dim, 210 * dim, 160);
-                g.circle(x, y, r);
-                g.stroke();
-            }
+        // Slot 外观保持 Prefab 原色；只给 BallVisual 应用球图、球色和占用显示。
+        for (let i = 0; i < this._slotSprites.length; i++) {
+            const sprite = this._slotSprites[i];
+            sprite.spriteFrame = BallVisuals.baseFrame;
+            sprite.color = new Color(base.r, base.g, base.b, 255);
+            sprite.enabled = i < this.count;
         }
     }
 }

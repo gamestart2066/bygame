@@ -37,6 +37,8 @@ export class TrackSystem extends Component {
     private _slots: (Ball | null)[] = [];
     /** 轨道累计行进弧长（像素） */
     private _travel: number = 0;
+    /** 当前关卡运行时速度倍率，不回写全局配置。 */
+    private _speedMultiplier: number = 1;
     private _graphics: Graphics | null = null;
     /** 轨道几何中心 */
     private _center: Vec3 = new Vec3();
@@ -177,6 +179,10 @@ export class TrackSystem extends Component {
         return this._slots.reduce((n, s) => n + (s ? 1 : 0), 0);
     }
 
+    public setSpeedMultiplier(multiplier: number): void {
+        this._speedMultiplier = Math.max(0, multiplier);
+    }
+
     /**
      * 查找当前正经过入口、且为空的槽位（按弧长容差判定）。
      * @returns 槽位索引，找不到返回 -1
@@ -223,7 +229,7 @@ export class TrackSystem extends Component {
     }
 
     protected update(dt: number): void {
-        this._travel += CFG.trackSpeed * dt;
+        this._travel += CFG.trackSpeed * this._speedMultiplier * dt;
         if (this._travel >= this.perimeter) this._travel -= this.perimeter;
 
         for (let i = 0; i < this._slots.length; i++) {

@@ -17,7 +17,7 @@
 - Cocos Creator 3.8.6 空工程，2D 竖屏 750×1334，引擎模块已按 2D 裁剪
 - Git 仓库（官方 `.gitignore` 模板）
 - 项目记忆机制：`AGENT.md` + `.agent/` 五文件 + `load-memory.mjs`
-- 代码静态自检：`node .agent/check-code.mjs` → 28 个 `.ts`，0 问题
+- 代码静态自检：`node .agent/check-code.mjs` → 30 个 `.ts`，0 问题
 
 ### 玩法核心（第一版 15 项需求已全部编码实现）
 
@@ -26,7 +26,9 @@
 
 - **场景驱动**：格子与 V 槽由用户在编辑器摆放，代码只扫描，不生成布局
 - **混合驱动**：物理（下落）→ 脚本定位（在轨）→ Tween（入箱）
-- **收纳箱队列**：固定 4 列，仅第一行可收，列内向上补位
+- **小球资源链路**：Ball Prefab + 关卡前预热的 BallPool；ColorBlock 实体 Slot 两阶段出球，Pool 复用执行深度 reset
+- **收纳箱队列**：CollectBox Prefab 驱动、固定 4 列；每箱 3 个可编辑 Slot，每槽以 BallVisual 作为飞入目标和最终显示；仅已完成补位的第一行可收
+- **轨道节奏**：关卡基础速度已提高；本关全部 ColorBlock 至少点击一次后切换为基础速度 2 倍
 
 ### 框架
 
@@ -40,7 +42,7 @@
 ### 资源
 
 - `play/map/LevelTerrain_01.prefab`：3 个 `ColorBlock` + 1 个 `VSlot`（内含 `EntranceGate`），根节点挂 `TerrainRoot`
-- `play/prefab/`：`ColorBlock.prefab` · `VSlot.prefab`
+- `play/prefab/`：`Ball.prefab` · `ColorBlock.prefab` · `VSlot.prefab` · `CollectBox.prefab`
 - `play/ui/`：`PauseUI.prefab` · `ResultUI.prefab`
 
 ---
@@ -56,7 +58,7 @@ Cocos Creator 中实际运行，核心流程基本正常。场景挂载、Bundle
 - 完善功能细节与异常边界
 - 增强动画表现与操作反馈
 - 持续调优地形布局、物理汇流和整体手感
-- Ball Prefab / BallPool / ColorBlock 实体 Slot 出球链路已编码，待 Creator 内完成资源绑定并实跑验证
+- 对 BallPool 预热、ColorBlock 出球、CollectBox 三槽收纳和轨道两段速度做 Creator 集成实跑验证
 - 核心链路验证稳定后扩展关卡
 
 ---

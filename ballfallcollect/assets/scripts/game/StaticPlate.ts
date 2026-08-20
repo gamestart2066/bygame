@@ -20,7 +20,7 @@ const { ccclass, property } = _decorator;
 @ccclass('StaticPlate')
 export class StaticPlate extends Component {
     @property({ tooltip: '摩擦系数' })
-    public friction: number = 0.3;
+    public friction: number = 0;
 
     @property({ tooltip: '弹性系数' })
     public restitution: number = 0.05;

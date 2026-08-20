@@ -9,7 +9,7 @@
 
 - [ ] 根据运行反馈完善功能细节、修 bug、调布局与操作手感
 - [ ] 完善核心流程的动画表现与操作反馈
-- [ ] 在 Cocos Creator 中完成 `Ball.prefab` 的 Ball 脚本与单一基础 SpriteFrame 绑定，实跑验证 BallPool 深度 reset、Slot 连续出球与 Scene/Restart 清理
+- [ ] 在 Cocos Creator 中集成验证 BallPool 关卡前预热与深度 reset、ColorBlock 连续出球、CollectBox 三个 BallVisual 收纳、补位禁收和全格点击后轨道 2 倍速
 
 ---
 

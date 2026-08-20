@@ -12,7 +12,7 @@ export class BallPool {
     private _poolRoot: Node | null = null;
     private _disposed: boolean = false;
 
-    public async init(prefabPath: string, parent: Node): Promise<boolean> {
+    public async init(prefabPath: string, parent: Node, prewarmCount: number): Promise<boolean> {
         this.dispose();
         this._disposed = false;
         this._prefab = await ResManager.load(prefabPath, Prefab);
@@ -40,10 +40,27 @@ export class BallPool {
         probe.resetForPool();
         probe.node.setParent(this._poolRoot);
         this._idle.push(probe);
+
+        // probe 本身就是第一颗可复用 Ball；其余实例在关卡开放操作前一次性补齐，
+        // 避免玩家点击 ColorBlock 时集中 instantiate 造成掉帧。
+        const targetCount = Math.max(1, Math.floor(prewarmCount));
+        for (let i = this._idle.length; i < targetCount; i++) {
+            const node = instantiate(this._prefab);
+            const ball = node.getComponent(Ball);
+            if (!ball || !ball.validatePrefab()) {
+                console.error(`[BallPool] 预热第 ${i + 1} 颗 Ball 失败，关卡已阻止启动。`);
+                node.destroy();
+                this.dispose();
+                return false;
+            }
+            ball.resetForPool();
+            ball.node.setParent(this._poolRoot);
+            this._idle.push(ball);
+        }
         return true;
     }
 
-    public get(color: BallColor, fromPos: Vec3, toPos: Vec3, parent: Node): Ball | null {
+    public get(color: BallColor, spawnPos: Vec3, parent: Node): Ball | null {
         if (this._disposed || !this._prefab) {
             console.error('[BallPool] 尚未成功初始化，无法获取 Ball。');
             return null;
@@ -59,7 +76,7 @@ export class BallPool {
             }
         }
         this._active.add(ball);
-        if (!ball.activate(color, fromPos, toPos, parent, (b) => this.recycle(b))) {
+        if (!ball.activate(color, spawnPos, parent, (b) => this.recycle(b))) {
             this._active.delete(ball);
             ball.node.destroy();
             return null;
@@ -84,7 +101,25 @@ export class BallPool {
         for (const ball of Array.from(this._active)) this.recycle(ball);
         this._active.clear();
         this._idle.length = 0;
-        if (this._poolRoot?.isValid) this._poolRoot.destroy();
+        if (this._poolRoot?.isValid) {
+            this._poolRoot.destroy();
+        }
+        this._poolRoot = null;
+        this._prefab = null;
+        BallVisuals.clear();
+    }
+
+    /**
+     * Game Scene teardown 专用：停止活动 Ball 并清空引用，但不 destroy/reparent 节点。
+     * 所有 Ball 与 BallPool 根节点都属于当前 Scene，由 Scene 唯一负责最终销毁。
+     */
+    public releaseForSceneTeardown(): void {
+        this._disposed = true;
+        for (const ball of this._active) {
+            if (ball?.isValid) ball.resetForPool();
+        }
+        this._active.clear();
+        this._idle.length = 0;
         this._poolRoot = null;
         this._prefab = null;
         BallVisuals.clear();

@@ -113,7 +113,7 @@ Game (cc.Scene)
 > **为什么**：第一版曾用代码创建全部节点并计算坐标，用户实车运行后认为布局
 > 完全不符合预期且无法调整。**不要再回到「代码生成布局」。**
 
-**例外（与机制强绑定，非美术）**：屏幕边界墙、收纳箱、HUD 仍由代码创建。
+**例外（与机制强绑定，非美术）**：屏幕边界墙、HUD 仍由代码创建。收纳箱由 `CollectBox.prefab` 实例化，箱体颜色统一修改 Prefab 根节点的 `Sprite.color`，不再由代码绘制箱体。
 
 ### 3.3 场景驱动组件
 
@@ -167,7 +167,11 @@ SystemStatic(墙) → Track → BoxLayer → BallLayer → HUD
 
 | 细节 | 做法 | 原因 |
 |---|---|---|
-| 逐球释放（间隔见 `CFG`） | `scheduleOnce` 链式调用 | 9 球同帧生成会重叠，Box2D 会剧烈弹开 |
+| 逐球释放（间隔见 `CFG`） | `releaseInterval` 是相邻 Slot/真实球释放间隔的唯一参数；`>0` 用 schedule，`<=0` 必须同帧直接启动全部 Tween（不能 `scheduleOnce(0)`）；Tween 可并行，每颗只在自己的动画完成后生成真实球 | 动画时长只增加统一前置延迟，不改变球与球之间的间隔 |
+| ColorBlock 出球表现 | 实体 Slot Sprite 在各自原位先上抬再下落：左列向左外扩、右列向右外扩、中列保持竖直；完整 Tween 中持续放大到 `CFG.ballVisualScale`，结束后才隐藏并在各自动画终点从 BallPool 取真实 Ball | 展示球与物理球分离，保持坐标对应，并分散较大 Collider 的出生位置 |
+| 真实 Ball 初速度 | 启用物理的同一帧应用 `CFG.ballInitialVelocityX/Y`（当前轻微向下） | 接续 Slot 展示球的下落趋势；Pool 回收时归零，不跨生命周期残留 |
+| BallPool 预热 | `GameManager.startLevel()` 在 Playing 前按 `CFG.ballPoolPrewarmCount` 实例化并 reset（当前 18） | 首次点击不集中 instantiate；不足时仍可安全扩容 |
+| 轨道两段速度 | `CFG.trackSpeed` 是关卡基础速度；全部 ColorBlock 至少点击一次后使用 `trackAllBlocksClickedMultiplier`（当前 2） | 运行时倍率只属于本关，不回写 CFG、不污染 Restart/下一关 |
 | 入口**每帧最多放行 1 球** | `handleEntry` 只处理队首 | 防止同帧多球抢占同一槽位 |
 | 槽位**立即占位** | `tryAccept` 先写 `_slots[i]` 再播吸附动画 | 动画期间槽位不能被再次分配 |
 | 先到先入 | `waitTicket` 自增票号排序 | 避免物理堆积顺序带来的不确定性 |
@@ -180,6 +184,7 @@ SystemStatic(墙) → Track → BoxLayer → BallLayer → HUD
 - 颜色唯一映射为 `BallColor → GameTypes.getColor() → Sprite.color`。
 - 实际 Ball 与 `ColorBlock/Slots` 必须共享上述映射和同一个基础 SpriteFrame，禁止维护两套颜色表。
 - 不在 Inspector 中为每种颜色逐个绑定 SpriteFrame；未来确需不同帧时，优先通过代码和资源系统统一加载。
+- Ball Root 始终保持 `(1,1,1)`，不依赖节点缩放驱动物理；真实球的视觉倍率作用于 `Ball/Sprite`，统一取 `CFG.ballVisualScale`（当前 `2.0`）。碰撞基准必须直接读取 `Ball.prefab` 上序列化的 `CircleCollider2D.radius`，启用物理时使用“Prefab 原始半径 × ballVisualScale”，Pool 回收时恢复该原始半径；禁止用 Node/UITransform 尺寸或 `CFG.ballRadius` 代替 Prefab Collider 配置。ColorBlock Slot 保持 Prefab 自身尺寸。
 
 ---
 
@@ -217,7 +222,7 @@ Hall    [HallEntry]    → 打开 HallUI（关卡切换 + 开始）
 Game    [GameEntry]    → 打开 HUD + 驱动 GameManager.startLevel()
 ```
 
-- 切场景统一走 `SceneRouter`，切换前自动 `UIManager.closeAll()` + `EventBus.clear()`（防跨场景悬挂监听）
+- 切场景统一走 `SceneRouter`；切换前 `UIManager.releaseForSceneSwitch()` 只释放管理器引用并清空 `EventBus`。场景节点最终销毁唯一归 Scene teardown，禁止切换前再 `closeAll()/destroy`
 - `GameManager` **不在 `onLoad` 自动启动**，改为 `startLevel()`（地形需异步加载）
 - Loading 进度是**真实**的：资源条目数（0.7）+ 场景预加载回调（0.3）；
   `minShowTime` 只控制最短停留，不伪造百分比；资源缺失不致命，走 fallback
@@ -259,6 +264,8 @@ Game    [GameEntry]    → 打开 HUD + 驱动 GameManager.startLevel()
 - ❗ **`UIManager.bringToFront()` 必须在 `GameManager.startLevel()` 之后调用**：
   游戏层是运行时 append 到 Canvas 的，会排在 `UIRoot` 之后，不置顶则弹窗被游戏内容盖住
 - `UIManager.init()` 优先复用场景中已有的 `UIRoot`，没有才动态创建
+- 正常关闭单个 Popup 由 `UIManager.close()` 销毁；切 Scene 时 `UIManager` 只释放引用，Popup 最终由 Scene teardown 销毁，禁止两边重复 `destroy`
+- 组件 `onDestroy()` 已处于 Scene 预销毁阶段：只能取消调度、失效回调和释放引用，禁止再修改子节点 Transform/active；`ColorBlock` 曾因此在 `restoreSlot()` 中触发空 Transform 异常
 - 各面板用 `@property` 引用子节点，留空时按节点名/路径自动查找，找不到 `console.warn`
   （编辑器里改名或漏拖引用不会静默失败）
 - `GameManager` **不持有任何 Label / Button**，只 `EventBus.emit`
@@ -321,5 +328,6 @@ node .agent/check-code.mjs          # 默认扫 assets/scripts
 
 - `layoutBoxes()` 对不可见箱子一律**直接 `setPosition`**，不用动画
 - `onBoxFinished()` 中**先 `refreshQueue()` 恢复 active，再 `layoutBoxes(true)`**，顺序不能颠倒
-- `CollectBox.moveTo()` 用 `Tween.stopAllByTarget(node)` 防止补位动画叠加，
-  并用 `_finished` 守卫避免打断消失动画
+- `CollectBox.moveTo()` 用 `Tween.stopAllByTarget(node)` 防止补位动画叠加，并用 `_finished` 守卫避免打断消失动画
+- `CollectBox.prefab/Slots` 固定包含 3 个槽节点，每个槽下固定有 `BallVisual(Sprite)` 子节点；Slot Sprite 是槽外观，禁止改色，BallVisual 才是已收纳球的最终显示和飞入目标。球先预占目标，再以 BallVisual 世界坐标转换到 BallLayer。首排资格与“补位已完成”是两个独立条件，补位 Tween 期间禁止收球。
+- 收纳箱布局直接使用中心点间距 `CFG.boxColumnSpacing / boxRowSpacing`；两者应分别略大于箱体宽高。Slot Sprite 保留 Prefab 自身颜色，运行时代码禁止改写其 `Sprite.color`。

@@ -1,5 +1,5 @@
 import {
-    _decorator, Component, Node, Sprite, UITransform, Vec3, Color, EventTouch,
+    _decorator, Component, Node, Sprite, UITransform, Vec3, Color, EventTouch, Tween, tween,
 } from 'cc';
 import { BallColor, CFG, getColor } from '../core/GameTypes';
 import { BallVisuals } from './BallVisuals';
@@ -27,13 +27,21 @@ export class ColorBlock extends Component {
     public remaining: number = CFG.ballsPerBlock;
 
     private _releasing: boolean = false;
+    /** 本关是否至少成功触发过一次点击释放。 */
+    private _hasBeenClicked: boolean = false;
     private _background: Node | null = null;
     private _bgSprite: Sprite | null = null;
     private _slotNodes: Node[] = [];
     private _slotSprites: Sprite[] = [];
+    private _slotPositions: Vec3[] = [];
+    private _slotScales: Vec3[] = [];
     private _initialized: boolean = false;
-    /** 释放一个球时的回调：(color, 起点=被释放槽位的世界坐标, 终点=出球点世界坐标) */
-    private _onRelease: ((color: BallColor, fromWorldPos: Vec3, toWorldPos: Vec3) => boolean) | null = null;
+    private _releaseToken: number = 0;
+    /** 下一颗尚未启动展示动画的 Slot；与 remaining 分离，允许多个 Tween 并行。 */
+    private _nextSlotIndex: number = -1;
+    private _pendingReleases: number = 0;
+    /** 展示球动画结束后的回调：(color, 动画终点世界坐标) */
+    private _onRelease: ((color: BallColor, spawnWorldPos: Vec3) => boolean) | null = null;
 
     /**
      * 由 GameManager 在扫描到本格子后调用，分配颜色并激活。
@@ -42,11 +50,14 @@ export class ColorBlock extends Component {
     public setup(
         color: BallColor,
         index: number,
-        onRelease: (color: BallColor, fromWorldPos: Vec3, toWorldPos: Vec3) => boolean
+        onRelease: (color: BallColor, spawnWorldPos: Vec3) => boolean
     ): void {
         this.colorId = color;
         this.blockIndex = index;
         this.remaining = CFG.ballsPerBlock;
+        this._nextSlotIndex = this.remaining - 1;
+        this._pendingReleases = 0;
+        this._hasBeenClicked = false;
         this._onRelease = onRelease;
         this._initialized = true;
 
@@ -62,6 +73,8 @@ export class ColorBlock extends Component {
         this._slotSprites = this._slotNodes
             .map((n) => n.getComponent(Sprite))
             .filter((s): s is Sprite => !!s);
+        this._slotPositions = this._slotNodes.map((n) => n.position.clone());
+        this._slotScales = this._slotNodes.map((n) => n.scale.clone());
         if (this._slotNodes.length < CFG.ballsPerBlock) {
             console.error(
                 `[ColorBlock] Slots 只有 ${this._slotNodes.length} 个实体节点，` +
@@ -85,47 +98,142 @@ export class ColorBlock extends Component {
     /** 开始释放：逐球间隔投放，避免同帧重叠导致物理爆炸 */
     public startRelease(): void {
         if (!this._initialized || this._releasing || this.remaining <= 0) return;
+        this._hasBeenClicked = true;
         this._releasing = true;
-        this.releaseOne();
+        this._releaseToken++;
+        this.startNextDisplayRelease(this._releaseToken);
     }
 
-    private releaseOne(): void {
+    /** 只负责按 releaseInterval 启动动画，不等待上一颗 Tween 完成。 */
+    private startNextDisplayRelease(token: number): void {
+        if (token !== this._releaseToken || !this._releasing) return;
+        if (this._nextSlotIndex < 0) {
+            if (this._pendingReleases <= 0) this._releasing = false;
+            return;
+        }
+
+        const slotIndex = this._nextSlotIndex--;
+        this._pendingReleases++;
+        this.animateDisplayRelease(slotIndex, token);
+
+        if (this._nextSlotIndex >= 0) {
+            if (CFG.releaseInterval <= 0) {
+                // scheduleOnce(0) 仍会延后到后续调度帧；0 间隔必须在本帧直接启动。
+                this.startNextDisplayRelease(token);
+            } else {
+                this.scheduleOnce(
+                    () => this.startNextDisplayRelease(token),
+                    CFG.releaseInterval
+                );
+            }
+        }
+    }
+
+    private animateDisplayRelease(slotIndex: number, token: number): void {
         if (this.remaining <= 0) {
             this._releasing = false;
             this.redraw();
             return;
         }
 
-        const releasedSlot = this.remaining - 1;
-        const spawned = this._onRelease?.(
-            this.colorId,
-            this.getSlotWorldPos(releasedSlot),
-            this.getSpawnWorldPos()
-        ) ?? false;
-        if (!spawned) {
-            // Pause / GameOver / Pool 未就绪时保持 Slot 可见，不产生视觉与逻辑脱节。
-            this._releasing = false;
+        const slot = this._slotNodes[slotIndex];
+        if (!slot) {
+            console.error(`[ColorBlock] 找不到待释放的 Slot index=${slotIndex}。`);
+            this.abortReleaseBatch();
             return;
         }
 
-        // Ball 已在同一世界坐标激活后，才同步扣减并隐藏对应 Slot。
-        this.remaining--;
-        this.redraw();
+        const originPos = this._slotPositions[slotIndex] ?? slot.position.clone();
+        const originScale = this._slotScales[slotIndex] ?? slot.scale.clone();
+        // 这是实际 Ball 出现前的完整展示动画，不受 releaseInterval 截短。
+        const duration = Math.max(0, CFG.slotReleaseDuration);
+        const liftDuration = duration * 0.35;
+        const dropDuration = duration - liftDuration;
+        // 以 Slot 在 ColorBlock 内的局部 X 判断向外方向：左列向左、右列向右、
+        // 中列保持竖直。终点保留外扩，使较大的真实 Ball 出生时更分散。
+        const directionX = originPos.x < -1 ? -1 : originPos.x > 1 ? 1 : 0;
+        const outwardX = directionX * CFG.slotReleaseOutwardDistance;
+        const liftPos = new Vec3(
+            originPos.x + outwardX * 0.55,
+            originPos.y + CFG.slotReleaseLiftDistance,
+            originPos.z
+        );
+        const targetPos = new Vec3(
+            originPos.x + outwardX,
+            originPos.y - CFG.slotReleaseDropDistance,
+            originPos.z
+        );
+        const liftScale = new Vec3(
+            originScale.x * (1 + (CFG.ballVisualScale - 1) * 0.35),
+            originScale.y * (1 + (CFG.ballVisualScale - 1) * 0.35),
+            originScale.z
+        );
+        const targetScale = new Vec3(
+            originScale.x * CFG.ballVisualScale,
+            originScale.y * CFG.ballVisualScale,
+            originScale.z
+        );
 
-        if (this.remaining > 0) {
-            this.scheduleOnce(() => this.releaseOne(), CFG.releaseInterval);
-        } else {
+        Tween.stopAllByTarget(slot);
+        slot.active = true;
+        slot.setPosition(originPos);
+        slot.setScale(originScale);
+        tween(slot)
+            .to(liftDuration, { position: liftPos, scale: liftScale }, { easing: 'quadOut' })
+            .to(dropDuration, { position: targetPos, scale: targetScale }, { easing: 'quadIn' })
+            .call(() => this.finishDisplayRelease(slotIndex, token))
+            .start();
+    }
+
+    private finishDisplayRelease(slotIndex: number, token: number): void {
+        if (token !== this._releaseToken || !this._releasing) return;
+        const slot = this._slotNodes[slotIndex];
+        if (!slot?.isValid) {
+            this.abortReleaseBatch();
+            return;
+        }
+
+        // 先记录动画终点，再隐藏展示球；真实 Ball 随后在同一点出现。
+        const spawnWorldPos = this.getSlotWorldPos(slotIndex);
+        slot.active = false;
+        const spawned = this._onRelease?.(this.colorId, spawnWorldPos) ?? false;
+        if (!spawned) {
+            // Pause / GameOver / Pool 未就绪：整批失效，恢复所有尚未消费的展示球。
+            this.abortReleaseBatch();
+            return;
+        }
+
+        this.remaining--;
+        this._pendingReleases--;
+        this.restoreSlot(slotIndex, false);
+        this.redrawBackground();
+
+        if (this.remaining <= 0 || (this._nextSlotIndex < 0 && this._pendingReleases <= 0)) {
             this._releasing = false;
-            this.redraw();
         }
     }
 
-    /**
-     * 出生飞行起点（世界坐标）：被释放的那个槽位指示点的世界坐标。
-     * 用真实的 SlotN 节点位置而非格子整体的通用锚点，
-     * 这样球才会看起来是从「原本显示的那个点」飞出去，而不是从格子底边的固定点飞出。
-     * 配合 getSpawnWorldPos() 形成「从格子飞到出生点」的视觉效果。
-     */
+    private abortReleaseBatch(): void {
+        this.unscheduleAllCallbacks();
+        this._releaseToken++;
+        this._releasing = false;
+        this._pendingReleases = 0;
+        this._nextSlotIndex = this.remaining - 1;
+        for (let i = 0; i < this._slotNodes.length; i++) {
+            this.restoreSlot(i, i < this.remaining);
+        }
+    }
+
+    private restoreSlot(index: number, visible: boolean): void {
+        const slot = this._slotNodes[index];
+        if (!slot) return;
+        Tween.stopAllByTarget(slot);
+        slot.setPosition(this._slotPositions[index] ?? new Vec3(0, 0, 0));
+        slot.setScale(this._slotScales[index] ?? new Vec3(1, 1, 1));
+        slot.active = visible;
+    }
+
+    /** Slot 当前锚点的世界坐标；释放动画终点由此转换为真实 Ball 出生点。 */
     public getSlotWorldPos(index: number): Vec3 {
         const node = this._slotNodes[index];
         const ui = node?.getComponent(UITransform);
@@ -134,7 +242,7 @@ export class ColorBlock extends Component {
         return this.getBlockWorldPos();
     }
 
-    /** 兜底：槽位节点缺失时退回格子底边中心（本节点自身 UITransform 计算） */
+    /** 兜底：槽位节点缺失时退回格子底边中心。 */
     private getBlockWorldPos(): Vec3 {
         const ui = this.getComponent(UITransform);
         const h = ui ? ui.contentSize.height : CFG.blockHeight;
@@ -146,31 +254,16 @@ export class ColorBlock extends Component {
             : this.node.worldPosition.clone();
     }
 
-    /**
-     * 出球点（世界坐标）：本节点底边中心略往下。
-     * 用世界坐标是因为格子可能被放在任意父节点层级下。
-     */
-    public getSpawnWorldPos(): Vec3 {
-        const ui = this.getComponent(UITransform);
-        const h = ui ? ui.contentSize.height : CFG.blockHeight;
-        const anchorY = ui ? ui.anchorY : 0.5;
-
-        const anchorX = ui ? ui.anchorX : 0.5;
-        const local = new Vec3(
-            (ui ? (0.5 - anchorX) * ui.contentSize.width : 0) + (Math.random() - 0.5) * 16,
-            -anchorY * h - CFG.ballRadius - 2,
-            0
-        );
-        const world = ui ? ui.convertToWorldSpaceAR(local) : this.node.worldPosition.clone();
-        return world;
-    }
-
     public isEmpty(): boolean {
         return this.remaining <= 0;
     }
 
     public isInitialized(): boolean {
         return this._initialized;
+    }
+
+    public hasBeenClicked(): boolean {
+        return this._hasBeenClicked;
     }
 
     /** 更新格子：只使用 Prefab 中已有的 Background 与 Slot Sprite。 */
@@ -207,12 +300,24 @@ export class ColorBlock extends Component {
     /** 胜负、Restart 或销毁前取消尚未执行的逐球释放。 */
     public stopRelease(): void {
         this.unscheduleAllCallbacks();
+        this._releaseToken++;
         this._releasing = false;
+        this._pendingReleases = 0;
+        this._nextSlotIndex = this.remaining - 1;
         this._onRelease = null;
+        for (let i = 0; i < this._slotNodes.length; i++) {
+            this.restoreSlot(i, i < this.remaining);
+        }
         this.node.off(Node.EventType.TOUCH_END, this.onTouch, this);
     }
 
     protected onDestroy(): void {
-        this.stopRelease();
+        // Scene teardown 已进入节点预销毁阶段，子 Slot 的内部 Transform 可能已被清空。
+        // 此处只能失效异步任务与释放引用，不能再 setPosition/setScale/active。
+        this.unscheduleAllCallbacks();
+        this._releaseToken++;
+        this._releasing = false;
+        this._onRelease = null;
+        this.node.off(Node.EventType.TOUCH_END, this.onTouch, this);
     }
 }

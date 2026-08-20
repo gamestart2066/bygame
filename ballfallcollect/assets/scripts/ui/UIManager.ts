@@ -169,6 +169,16 @@ export class UIManager {
         for (const n of names) this.close(n);
     }
 
+    /**
+     * Scene 切换专用：只释放 UIManager 持有的引用，不 destroy Scene 子节点。
+     * Popup 的最终销毁由 director.loadScene 的场景生命周期唯一负责。
+     */
+    public static releaseForSceneSwitch(): void {
+        this._panels.clear();
+        this._popupRoot = null;
+        this._root = null;
+    }
+
     public static get<T extends UIPanel>(name: UIName | string): T | null {
         const p = this._panels.get(name);
         return (p && p.isValid) ? (p as T) : null;

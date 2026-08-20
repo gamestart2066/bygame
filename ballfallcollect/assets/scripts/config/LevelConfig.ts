@@ -35,8 +35,6 @@ export enum ShuffleMode {
 export interface DifficultyParams {
     /** 轨道线速度（px/s）：越快留给玩家的判断时间越短 */
     trackSpeed?: number;
-    /** 逐球释放间隔（秒）：越小同时在场球越多 → 轨道压力越大 */
-    releaseInterval?: number;
     /** 满槽宽限（秒）：越小越容易判负 */
     loseGraceTime?: number;
     /** 每列可见行数：越小玩家能看到的未来信息越少 */
@@ -96,8 +94,7 @@ export const LEVELS: ReadonlyArray<LevelDef> = [
         colorKinds: 2,
         boxFill: BoxFillMode.Auto,
         difficulty: {
-            trackSpeed: 130,
-            releaseInterval: 0.14,
+            trackSpeed: 180,
             loseGraceTime: 2.0,
             boxVisibleRows: 3,
         },
@@ -113,8 +110,7 @@ export const LEVELS: ReadonlyArray<LevelDef> = [
         colorKinds: 3,
         boxFill: BoxFillMode.Auto,
         difficulty: {
-            trackSpeed: 150,
-            releaseInterval: 0.12,
+            trackSpeed: 200,
             loseGraceTime: 1.5,
             boxVisibleRows: 3,
         },
@@ -145,8 +141,7 @@ export const LEVELS: ReadonlyArray<LevelDef> = [
             [BallColor.Red, BallColor.Blue],                   // D 列（队首 RED）
         ],
         difficulty: {
-            trackSpeed: 160,
-            releaseInterval: 0.12,
+            trackSpeed: 220,
             loseGraceTime: 1.5,
             boxVisibleRows: 2,
         },
@@ -208,7 +203,6 @@ export function resolveDifficulty(def: LevelDef): Required<DifficultyParams> {
     const d = def.difficulty ?? {};
     return {
         trackSpeed: d.trackSpeed ?? CFG.trackSpeed,
-        releaseInterval: d.releaseInterval ?? CFG.releaseInterval,
         loseGraceTime: d.loseGraceTime ?? CFG.loseGraceTime,
         boxVisibleRows: d.boxVisibleRows ?? CFG.boxMaxVisibleRows,
     };

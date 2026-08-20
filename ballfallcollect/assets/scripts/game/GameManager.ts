@@ -1,5 +1,5 @@
 import {
-    _decorator, Component, Node, Vec2, Vec3, UITransform,
+    _decorator, Component, Node, Vec2, Vec3, UITransform, Prefab,
     PhysicsSystem2D, EPhysics2DDrawFlags, director,
 } from 'cc';
 import { BallColor, BallState, CFG, GameState } from '../core/GameTypes';
@@ -53,6 +53,7 @@ export class GameManager extends Component {
     private _track: TrackSystem | null = null;
     private _balls: Ball[] = [];
     private _ballPool: BallPool = new BallPool();
+    private _collectBoxPrefab: Prefab | null = null;
 
     private _terrainLayer: Node | null = null;
     private _boxLayer: Node | null = null;
@@ -62,6 +63,7 @@ export class GameManager extends Component {
     private _collected: number = 0;
     private _ticketSeq: number = 0;
     private _blockedTime: number = 0;
+    private _allBlocksSpeedBoosted: boolean = false;
     private _startTime: number = 0;
 
     /** 入口捕获区中心（取自 EntranceGate） */
@@ -75,8 +77,10 @@ export class GameManager extends Component {
     protected onDestroy(): void {
         this._state = GameState.Ready;
         this.stopBlockReleases();
-        this.recycleAllBalls();
-        this._ballPool.dispose();
+        // 当前 Canvas/BallLayer/Pool/Ball 都由 Scene teardown 统一销毁。
+        // 此处只停异步状态并释放引用，禁止回收重挂或再次 destroy Scene 子节点。
+        this._ballPool.releaseForSceneTeardown();
+        this._balls.length = 0;
         EventBus.offTarget(this);
     }
 
@@ -100,8 +104,21 @@ export class GameManager extends Component {
         this.buildLayers();
 
         if (!this._ballLayer
-            || !await this._ballPool.init(ResPaths.prefab(PrefabNames.Ball), this._ballLayer)) {
+            || !await this._ballPool.init(
+                ResPaths.prefab(PrefabNames.Ball),
+                this._ballLayer,
+                CFG.ballPoolPrewarmCount,
+            )) {
             const errors = ['Ball.prefab 加载或配置失败，关卡已阻止启动。'];
+            EventBus.emit(GameEvent.LevelValidateFailed, { levelId: def.levelId, errors });
+            return false;
+        }
+
+        this._collectBoxPrefab = await ResManager.load(
+            ResPaths.prefab(PrefabNames.CollectBox), Prefab
+        );
+        if (!this._collectBoxPrefab) {
+            const errors = ['CollectBox.prefab 加载失败，关卡已阻止启动。'];
             EventBus.emit(GameEvent.LevelValidateFailed, { levelId: def.levelId, errors });
             return false;
         }
@@ -137,7 +154,12 @@ export class GameManager extends Component {
         this._track.node.setSiblingIndex(trackIndex);
 
         this.setupBlocks(plan);
-        this.createBoxes(plan.boxColumns);
+        this._allBlocksSpeedBoosted = false;
+        if (!this.createBoxes(plan.boxColumns)) {
+            const errors = ['CollectBox.prefab 结构或脚本配置错误，关卡已阻止启动。'];
+            EventBus.emit(GameEvent.LevelValidateFailed, { levelId: def.levelId, errors });
+            return false;
+        }
 
         this._startTime = Date.now();
         this._state = GameState.Playing;
@@ -150,7 +172,6 @@ export class GameManager extends Component {
     private applyDifficulty(def: LevelDef): void {
         const d = resolveDifficulty(def);
         CFG.trackSpeed = d.trackSpeed;
-        CFG.releaseInterval = d.releaseInterval;
         CFG.loseGraceTime = d.loseGraceTime;
         CFG.boxMaxVisibleRows = d.boxVisibleRows;
     }
@@ -234,7 +255,7 @@ export class GameManager extends Component {
         for (let i = 0; i < this._blocks.length; i++) {
             const block = this._blocks[i];
             const color = plan.blockColors[i];
-            block.setup(color, i, (c, fromPos, toPos) => this.onBallReleased(c, fromPos, toPos));
+            block.setup(color, i, (c, spawnPos) => this.onBallReleased(c, spawnPos));
         }
     }
 
@@ -259,7 +280,8 @@ export class GameManager extends Component {
 
     // ==================== 收纳箱：固定列 + 列内补位 ====================
 
-    private createBoxes(columns: BallColor[][]): void {
+    private createBoxes(columns: BallColor[][]): boolean {
+        if (!this._collectBoxPrefab) return false;
         const colCount = Math.max(1, CFG.boxColumnCount);
         this._columns = [];
         for (let c = 0; c < colCount; c++) this._columns.push([]);
@@ -268,30 +290,33 @@ export class GameManager extends Component {
         for (let c = 0; c < colCount; c++) {
             const colors = columns[c] ?? [];
             for (let row = 0; row < colors.length; row++) {
-                const box = CollectBox.create(
+                const box = CollectBox.createFromPrefab(
+                    this._collectBoxPrefab,
                     colors[row], seq++,
                     new Vec3(this.columnX(c), this.rowY(row), 0),
                     this._boxLayer ?? this.node,
                     (b) => this.onBoxFinished(b)
                 );
+                if (!box) return false;
                 box.columnIndex = c;
                 this._columns[c].push(box);
                 this._boxes.push(box);
             }
         }
         for (let c = 0; c < colCount; c++) this.refreshColumn(c, false);
+        return true;
     }
 
     /** 列的固定 X —— 由收纳箱系统独立定义，与顶部格子无关 */
     private columnX(col: number): number {
         const colCount = Math.max(1, CFG.boxColumnCount);
-        const step = CFG.boxWidth + CFG.boxColumnGap;
+        const step = CFG.boxColumnSpacing;
         const total = step * (colCount - 1);
         return -total / 2 + col * step;
     }
 
     private rowY(row: number): number {
-        return CFG.boxY - row * (CFG.boxHeight + CFG.boxRowGap);
+        return CFG.boxY - row * CFG.boxRowSpacing;
     }
 
     /** 刷新单独一列：列内向上补位（只改 Y）+ 可收状态 + 可见性 */
@@ -339,16 +364,13 @@ export class GameManager extends Component {
 
     // ==================== 事件 ====================
 
-    private onBallReleased(color: BallColor, fromWorldPos: Vec3, toWorldPos: Vec3): boolean {
+    private onBallReleased(color: BallColor, spawnWorldPos: Vec3): boolean {
         if (this._state !== GameState.Playing || this._paused || !this._ballLayer) return false;
 
-        const fromLocal = this._ballLayerUI
-            ? this._ballLayerUI.convertToNodeSpaceAR(fromWorldPos)
-            : fromWorldPos;
-        const toLocal = this._ballLayerUI
-            ? this._ballLayerUI.convertToNodeSpaceAR(toWorldPos)
-            : toWorldPos;
-        const ball = this._ballPool.get(color, fromLocal, toLocal, this._ballLayer);
+        const spawnLocal = this._ballLayerUI
+            ? this._ballLayerUI.convertToNodeSpaceAR(spawnWorldPos)
+            : spawnWorldPos;
+        const ball = this._ballPool.get(color, spawnLocal, this._ballLayer);
         if (!ball) return false;
         this._balls.push(ball);
         return true;
@@ -372,6 +394,7 @@ export class GameManager extends Component {
         if (this._state !== GameState.Playing || this._paused) return;
 
         this.pruneBalls();
+        this.updateAllBlocksSpeedBoost();
         this.handleEntry();
         this.handleCollect();
         this.checkResult(dt);
@@ -379,6 +402,14 @@ export class GameManager extends Component {
 
     private pruneBalls(): void {
         this._balls = this._balls.filter((b) => b && b.isValid && !b.isRecycled);
+    }
+
+    /** 所有格子至少成功点击一次后，本关只触发一次轨道倍速。 */
+    private updateAllBlocksSpeedBoost(): void {
+        if (this._allBlocksSpeedBoosted || !this._track || this._blocks.length === 0) return;
+        if (!this._blocks.every((block) => block?.isValid && block.hasBeenClicked())) return;
+        this._allBlocksSpeedBoosted = true;
+        this._track.setSpeedMultiplier(CFG.trackAllBlocksClickedMultiplier);
     }
 
     /** 入轨：捕获区内按先到先入，每帧最多放行一个 */
@@ -415,8 +446,13 @@ export class GameManager extends Component {
             const box = this.findBoxFor(ball);
             if (!box) continue;
 
+            const targetWorld = box.reserveNextSlot(ball.colorId);
+            if (!targetWorld) continue;
+            const targetLocal = this._ballLayerUI
+                ? this._ballLayerUI.convertToNodeSpaceAR(targetWorld)
+                : targetWorld;
             this._track.releaseSlot(ball.slotIndex);
-            ball.flyToBox(box.getPos(), () => {
+            ball.flyToBox(targetLocal, () => {
                 if (box.isValid) box.addBall();
                 this._collected++;
                 EventBus.emit(GameEvent.BallCollected, { color: ball.colorId });
@@ -480,18 +516,6 @@ export class GameManager extends Component {
         for (const block of this._blocks) {
             if (block?.isValid) block.stopRelease();
         }
-    }
-
-    /** Scene 切换 / Restart 销毁 GameManager 时释放轨道槽并安全回收活动球。 */
-    private recycleAllBalls(): void {
-        for (const ball of this._balls) {
-            if (!ball?.isValid || ball.isRecycled) continue;
-            if (this._track?.isValid && ball.slotIndex >= 0) {
-                this._track.releaseSlot(ball.slotIndex);
-            }
-            this._ballPool.recycle(ball);
-        }
-        this._balls.length = 0;
     }
 
     private emitProgress(): void {
