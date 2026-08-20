@@ -1,0 +1,317 @@
+# TECH_NOTES.md — 技术决策与约束
+
+> 只保留**当前仍然有效**的技术决策、架构选择、以及容易再次踩到的坑。
+> 目录规范见 `AGENT.md`，玩法设计见 `GAME_DESIGN.md`。
+
+---
+
+## 一、锁定配置（改动前必须获得用户确认）
+
+### 1.1 引擎与项目
+
+| 配置 | 值 | 文件 |
+|---|---|---|
+| Cocos Creator | `3.8.6` | `package.json` |
+| 设计分辨率 | `750 × 1334` | `settings/v2/packages/project.json` |
+| TS 严格模式 | `strict: false` | `tsconfig.json` |
+
+`tsconfig.json` 的 `"extends": "./temp/tsconfig.cocos.json"` 为引擎生成，**不可编辑**。
+
+### 1.2 引擎模块裁剪
+
+**已启用**：
+```
+2d, affine-transform, animation, audio, base, custom-pipeline,
+dragon-bones, gfx-webgl, gfx-webgl2, graphics, intersection-2d,
+mask, particle-2d, physics-2d-box2d, profiler, rich-text,
+spine-3.8, tiled-map, tween, ui, video, webview
+```
+
+**已关闭（影响开发）**：
+
+| 模块 | 影响 |
+|---|---|
+| `3d`、3D 物理（ammo/cannon/physx/builtin） | 只能做 2D，只能用 2D 物理 |
+| `particle`（3D 粒子） | 特效只能用 `particle-2d` |
+| `websocket` | **当前无法联网** |
+| `gfx-webgpu` | 仅 WebGL / WebGL2 |
+| `skeletal-animation` | 骨骼动画走 Spine 3.8 / DragonBones |
+| `physics-2d-box2d-wasm` | 用经典 asm.js 版 Box2D |
+
+> ⚠️ 新增模块会增大包体，开启前先向用户说明原因。
+
+### 1.3 2D 物理与渲染管线
+
+- **Box2D 刚体**（`physics-2d-box2d`），仅用于「格子 → V 槽 → 轨道入口」；
+  上轨后关闭物理改为脚本定位（见 3.1）。`intersection-2d` 已启用但未使用，保留备用。
+- 使用 **`custom-pipeline`**，`legacy-pipeline` 已关闭 —— 基于 legacy 的老教程/插件可能不兼容。
+
+---
+
+## 二、场景与协作约束
+
+3 个场景位于 `assets/scenes/`，节点树同构：
+
+```
+Game (cc.Scene)
+└─ Canvas          [UITransform 750×1334, Canvas, Widget, GameEntry]
+   └─ Camera       [Camera 正交, orthoHeight=667, far=2000, 黑色清屏]
+```
+
+| 场景 | Canvas 上的入口脚本 |
+|---|---|
+| `Loading.scene` | `LoadingEntry` |
+| `Hall.scene` | `HallEntry` |
+| `Game.scene` | `GameEntry` |
+
+- ❗ **`GameManager` 不需要手挂**，由 `GameEntry` 用 `getComponent ?? addComponent` 自动补挂。
+- 场景中除 Canvas / Camera 外**没有其他节点**，格子与 V 槽全部来自地形 Prefab，运行时加载。
+- Canvas 关键属性：坐标 `(375,667)`、锚点 `(0.5,0.5)`、`Widget._alignFlags=45` /
+  `_alignMode=2`、`_alignCanvasWithScreen=true`、场景 `autoReleaseAssets=false`。
+
+**协作约束**
+
+1. `.scene` / `.prefab` 是带 UUID 的序列化 JSON（`__id__` 互相索引）。
+   AI 可手写**节点层级 + 引擎内置组件**；**自定义脚本组件与资源 UUID 必须留给用户在编辑器挂**
+   （边界见 `AGENT.md` 3.3，绝不伪造 UUID）。
+2. `.meta` 由引擎维护 UUID，不要手动创建或修改。
+3. `library/` `temp/` `profiles/` `build/` `local/` 是生成物，不纳入版本管理。
+4. AI 看不到画面 → 运行结果、报错、手感必须由用户反馈。
+
+---
+
+## 三、核心架构决策
+
+### 3.1 混合驱动（最重要）
+
+小球分阶段由不同机制驱动，**不要试图统一成纯物理**：
+
+| 阶段 | 驱动方式 |
+|---|---|
+| 格子 → V 槽 → 入口 | **Box2D**：`RigidBody2D(Dynamic)` + `CircleCollider2D` |
+| 在轨道上 | **脚本定位**：关闭刚体与碰撞体，每帧按槽位弧长 `setPosition` |
+| 飞入收纳箱 | **Tween** 位置补间 |
+
+**理由**：24 个球在轨道上继续用物理会互相挤压抖动、槽位错乱、无法精确对齐。
+切换点在 `Ball.disablePhysics()`。
+
+### 3.2 场景驱动：布局在场景，逻辑在代码
+
+| 谁负责 | 内容 |
+|---|---|
+| **用户（编辑器）** | 格子与 V 槽的数量/位置/尺寸/角度、UI、美术、关卡布局 |
+| **代码** | 扫描场景 → 分配颜色 → 生成球 → 物理 → 轨道 24 槽 → 收纳箱 → 胜负 |
+
+**扫描机制**：`GameManager.scan<T>()` 先扫自身子树，找不到再扫整个场景，
+因此 `GameManager` 挂 `Canvas` 或挂场景根都能工作。
+
+#### 🚫 架构红线（违反即回退）
+
+**禁止**在 `GameManager` / `LevelConfig` / `StaticBuilder` 中出现：
+格子坐标、V 槽坐标、自动左右排列、固定行列数、写死格子数量。
+
+> **为什么**：第一版曾用代码创建全部节点并计算坐标，用户实车运行后认为布局
+> 完全不符合预期且无法调整。**不要再回到「代码生成布局」。**
+
+**例外（与机制强绑定，非美术）**：屏幕边界墙、收纳箱、HUD 仍由代码创建。
+
+### 3.3 场景驱动组件
+
+| 组件 | 挂在哪 | 作用 |
+|---|---|---|
+| `ColorBlock` | 用户摆放的格子节点 | 被扫描；颜色由代码 `setup()` 注入；点击释放 9 球 |
+| `VSlot` | V 槽 Prefab 根节点 | 被扫描统计；自动为子板补挂 `StaticPlate` |
+| `StaticPlate` | 任意矩形节点 | 按 `UITransform` 尺寸自动生成静态刚体 + 盒碰撞体 |
+
+- ⚠️ `StaticPlate` 按 **contentSize** 建碰撞体：**改大小用 Content Size，不要用 Scale**
+  （缩放对 2D 碰撞体不可靠）。已支持任意锚点。
+- ⚠️ `ColorBlock` 节点必须有 `UITransform` 且尺寸不为 0，否则点击区域无效。
+
+### 3.4 坐标系与层级（易错点）
+
+- 所有游戏对象都是 `Canvas`（750×1334，锚点 0.5）的子节点，
+  局部坐标以屏幕中心为原点：X ∈ [-375,375]，Y ∈ [-667,667]。
+- **所有图层位置必须是 `(0,0)` 且无缩放**，跨层距离判定（入轨、收纳）依赖这一点，
+  加偏移或缩放会让判定与物理全部出错。
+- 格子可能位于任意父节点层级下：`ColorBlock.getSpawnWorldPos()` 返回**世界坐标**，
+  由 `GameManager` 用 `convertToNodeSpaceAR()` 转成 `BallLayer` 局部坐标。
+- **渲染层级 = 创建顺序**（后创建的在上层），`setupLevel()` 中固定为：
+
+```
+SystemStatic(墙) → Track → BoxLayer → BallLayer → HUD
+      底                                      顶
+```
+  新增图层必须插入正确位置，不要图省事直接 `setParent(this.node)`
+  —— 否则会重现「球飞入收纳箱时被箱子盖住」。
+
+### 3.5 轨道路径模型：圆角矩形（跑道形）
+
+路径 = 上下两条水平直线 + 左右两个半圆（顺时针）：
+
+| 弧长区间 | 段 |
+|---|---|
+| `[0, L)` | 上边，向右 |
+| `[L, L+A)` | 右半圆，自上而下 |
+| `[L+A, 2L+A)` | 下边，向左 |
+| `[2L+A, 2L+2A)` | 左半圆，自下而上 |
+
+`L = 2 × trackStraightHalf`，`A = π × trackCornerRadius`。
+
+- 24 槽按**弧长**均分，**不可按角度均分**（角度均分会让两端球挤在一起）
+- 入口弧长 = `L/2`（上边中点），对齐 `EntranceGate`；轨道中心 = `EntranceGate − (0, trackCornerRadius)`，运行时计算
+- 入轨判定用**弧长容差** `entryArcTolerance`
+- `getPointAtLength(s)` 同时供逻辑定位与绘制采样，保证视觉与判定一致
+- 想更扁 → 减小 `trackCornerRadius`（它同时决定上下直线间距 = 2r）
+
+### 3.6 关键实现细节（改动前先理解）
+
+| 细节 | 做法 | 原因 |
+|---|---|---|
+| 逐球释放（间隔见 `CFG`） | `scheduleOnce` 链式调用 | 9 球同帧生成会重叠，Box2D 会剧烈弹开 |
+| 入口**每帧最多放行 1 球** | `handleEntry` 只处理队首 | 防止同帧多球抢占同一槽位 |
+| 槽位**立即占位** | `tryAccept` 先写 `_slots[i]` 再播吸附动画 | 动画期间槽位不能被再次分配 |
+| 先到先入 | `waitTicket` 自增票号排序 | 避免物理堆积顺序带来的不确定性 |
+| 失败判定带宽限 | 满槽且有球等待并持续累计 | 满槽是瞬时常态，无宽限会大量误判 |
+| 箱满后动画期不收球 | `_finished` 标志先置位 | 防止第 4 个球被收进已满的箱 |
+
+---
+
+## 四、框架结构
+
+### 4.1 地形 Prefab 约定（关键）
+
+```
+LevelTerrain_XX            [TerrainRoot]   ← 根节点必须挂 TerrainRoot
+├─ Blocks                  (可选分组容器)
+│  └─ ColorBlock ...       [ColorBlock]    ← 数量/坐标全由用户决定
+└─ VSlots                  (可选分组容器)
+   └─ VSlot ...            [VSlot]
+      └─ EntranceGate      ← 名称固定；物理挡板 + 轨道入口基准
+```
+
+- 扫描是**递归**的，可自由用容器分组
+- 代码只读取，**绝不修改**地形节点的位置 / 角度 / 尺寸
+- ⚠️ 场景中若有多个 `EntranceGate`，**只取最低的那个**作为轨道入口，
+  其余退化为普通挡板（球停在上面永远不入轨），运行时会打 warning
+
+### 4.2 LevelValidator（8 项，errors 阻止进入游戏）
+
+①格子颜色合法 ②每色球数可被箱容量整除 ③箱容量与球数**严格相等**
+④箱子颜色存在对应球 ⑤每种颜色都有箱 ⑥列结构合法（列数 = `boxColumnCount`）
+⑦地形必要组件（ColorBlock / VSlot / EntranceGate）⑧24 槽冲突（队首颜色覆盖不足 → 警告）
+
+> 关卡表与地形必须匹配：地形的格子数不满足配置时直接报错，不进入游玩。
+
+### 4.3 场景流程
+
+```
+Loading [LoadingEntry] → 初始化系统 / 加载资源 / 预加载 Hall → Hall
+Hall    [HallEntry]    → 打开 HallUI（关卡切换 + 开始）
+Game    [GameEntry]    → 打开 HUD + 驱动 GameManager.startLevel()
+```
+
+- 切场景统一走 `SceneRouter`，切换前自动 `UIManager.closeAll()` + `EventBus.clear()`（防跨场景悬挂监听）
+- `GameManager` **不在 `onLoad` 自动启动**，改为 `startLevel()`（地形需异步加载）
+- Loading 进度是**真实**的：资源条目数（0.7）+ 场景预加载回调（0.3）；
+  `minShowTime` 只控制最短停留，不伪造百分比；资源缺失不致命，走 fallback
+
+### 4.4 资源与 Bundle
+
+**项目没有 `assets/resources/` 目录**，所有资源都在 `play` Bundle 内，
+因此走 `assetManager.loadBundle('play')` + `bundle.load(...)`，**不用 `resources.load`**。
+
+| 约定 | 值 |
+|---|---|
+| 默认 Bundle | `ResPaths.defaultBundle = 'play'` |
+| 地形 | `ResPaths.terrain(name)` → `map/<name>` |
+| 通用预制体 | `ResPaths.prefab(name)` → `prefab/<name>` |
+| UI 预制体 | `ResPaths.ui(name)` → `ui/<name>`（**目录尚不存在**，属可选资源） |
+
+`ResManager` 行为要点：
+
+- `load()` 失败或资源不存在返回 **`null`**（不抛异常），调用方必须判空
+- `exists()` 用 `bundle.getInfoWithPath` 做存在性预检，避免加载缺失资源时刷无意义报错
+- `load()` 内含兜底：bundle 未加载会自动加载一次
+  → **直接从编辑器运行 `Game.scene`（跳过 Loading）也能工作**
+- 缓存 key 为 `bundle:path`，避免跨 bundle 同名冲突
+
+### 4.5 UI 架构
+
+**UI 全部是编辑器中可见可调的实体节点，代码不再用 `new Node` / `Graphics` 构造界面。**
+按生命周期分两类：
+
+| 类型 | UI | 位置 | 谁管理 |
+|---|---|---|---|
+| **场景固定节点** | `LoadingUI` · `HallUI` · `GameHUD` | 各场景 `Canvas/UIRoot/…` | 自己 `onEnable` 订阅事件，**不经过 UIManager** |
+| **动态 Popup** | `PauseUI` · `ResultUI` | `play/ui/*.prefab` | `UIManager.open/close`，实例化到 `UIRoot/PopupLayer` |
+
+判断标准：只属于一个场景且常驻 → 场景节点；需要动态开关、独立生命周期 → Prefab。
+**不要为了统一而把常驻 UI 也做成 Prefab。**
+
+- Game 场景 UI 层级固定为 `Canvas/UIRoot/{HUDLayer, PopupLayer}`，弹窗永远在 HUD 之上
+- ❗ **`UIManager.bringToFront()` 必须在 `GameManager.startLevel()` 之后调用**：
+  游戏层是运行时 append 到 Canvas 的，会排在 `UIRoot` 之后，不置顶则弹窗被游戏内容盖住
+- `UIManager.init()` 优先复用场景中已有的 `UIRoot`，没有才动态创建
+- 各面板用 `@property` 引用子节点，留空时按节点名/路径自动查找，找不到 `console.warn`
+  （编辑器里改名或漏拖引用不会静默失败）
+- `GameManager` **不持有任何 Label / Button**，只 `EventBus.emit`
+- 新增 Popup：`ResPaths.UIPrefabs` 加一项 + 写 `UIPanel` 子类 + 做 Prefab，不改 `UIManager`
+- `UIWidgets.ts` 保留但正式 UI 已不再使用
+
+### 4.6 代码静态自检
+
+```bash
+node .agent/check-code.mjs          # 默认扫 assets/scripts
+```
+
+检查括号平衡 + **代码区全角标点**（中文输入法误打 `（` 会导致语法错误，已实际发生过）。
+⚠️ **不能替代类型检查**。
+
+### 4.7 ⚠️ API 尚未经编译验证
+
+`temp/declarations/cc.d.ts` 是**占位文件**（297 B），真实声明在 Cocos 安装目录
+（工作目录之外），因此**本地无法做类型校验**。以下 API 首次编译时需重点确认：
+
+`EPhysics2DDrawFlags`、`PhysicsSystem2D.instance.debugDrawFlags`、
+`Graphics.ellipse()`、`Graphics.roundRect()`、`BoxCollider2D.size = new Size()`、
+`Collider2D.apply()`、`node.angle`、`Label.HorizontalAlign`
+
+---
+
+## 五、踩坑记录
+
+### 5.1 距离阈值判定必须先验算几何可达性
+
+收纳判定曾用「球心到箱心距离 ≤ 70」，但轨道最低点与箱心垂直间隙有 135px，
+**条件永远不成立**，球经过同色箱一次都收不进去。
+
+**现行判定**：颜色匹配 + 箱未满 + **水平对齐**（`CFG.collectAlignX`）+
+球位于轨道下半圈 + 箱在球下方。
+
+> **教训**：轨道与箱分处不同高度带时，用「投影对齐」而不是「距离阈值」。
+
+### 5.2 手写 .prefab：每个节点的 PrefabInfo 都必须挂 asset
+
+手写 Prefab 时给**子节点**的 `cc.PrefabInfo` 写了 `"asset": null`，
+编辑器里对应节点飘红并报 `AssetManager.queryAssetInfo / parameter error`
+（编辑器拿 null 当 uuid 去查资源）。
+
+**规则（以 `VSlot.prefab` 等引擎产物为准）**：
+
+| 位置 | `root` | `asset` | `nestedPrefabInstanceRoots` |
+|---|---|---|---|
+| 根节点 PrefabInfo | `{__id__:1}` | `{__id__:0}` | **不写** |
+| 子节点 PrefabInfo | `{__id__:1}` | `{__id__:0}` | `null` |
+| 组件 `__prefab` | 用 `cc.CompPrefabInfo`，只有 `fileId` | | |
+
+> **教训**：手写序列化文件前，先读一个**结构相同**的引擎产物做对照
+> （只有单节点的 ColorBlock.prefab 无法暴露子节点写法），不要凭推测补字段。
+
+### 5.3 隐藏节点上的 Tween 不会推进
+
+超出可见行数的收纳箱会 `active = false`，此时对它做位置 Tween 动画不推进，补位后位置会错。
+
+- `layoutBoxes()` 对不可见箱子一律**直接 `setPosition`**，不用动画
+- `onBoxFinished()` 中**先 `refreshQueue()` 恢复 active，再 `layoutBoxes(true)`**，顺序不能颠倒
+- `CollectBox.moveTo()` 用 `Tween.stopAllByTarget(node)` 防止补位动画叠加，
+  并用 `_finished` 守卫避免打断消失动画

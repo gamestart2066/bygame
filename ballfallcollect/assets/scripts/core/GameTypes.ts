@@ -1,0 +1,160 @@
+import { Color } from 'cc';
+
+/**
+ * 全局类型、常量与调参入口。
+ * 原型阶段所有可调数值集中在此，便于快速迭代手感。
+ */
+
+/** 小球颜色 ID（实际使用几种，由场景中的格子数量与 maxColorKinds 决定） */
+export enum BallColor {
+    Red = 0,
+    Blue = 1,
+    Green = 2,
+    Yellow = 3,
+    Purple = 4,
+    Orange = 5,
+}
+
+/** 颜色 ID → 显示颜色 */
+export const COLOR_TABLE: ReadonlyArray<Color> = [
+    new Color(230, 60, 60, 255),    // Red
+    new Color(60, 120, 230, 255),   // Blue
+    new Color(60, 200, 100, 255),   // Green
+    new Color(240, 200, 50, 255),   // Yellow
+    new Color(170, 90, 220, 255),   // Purple
+    new Color(245, 140, 50, 255),   // Orange
+];
+
+export function getColor(id: BallColor): Color {
+    return COLOR_TABLE[id] ?? COLOR_TABLE[0];
+}
+
+/** 小球生命周期状态 */
+export enum BallState {
+    /** 尚在顶部格子内，未释放 */
+    InBlock = 0,
+    /** 物理下落中（格子 → V 槽 → 轨道入口） */
+    Falling = 1,
+    /** 已到达入口捕获区，等待空槽 */
+    Waiting = 2,
+    /** 正在吸附进入轨道槽位（Tween 中） */
+    Entering = 3,
+    /** 已占据轨道槽位，随轨道运动 */
+    OnTrack = 4,
+    /** 正在飞入收纳箱（Tween 中） */
+    Collecting = 5,
+    /** 已被收纳，逻辑上出局 */
+    Collected = 6,
+}
+
+/** 游戏整体状态 */
+export enum GameState {
+    Ready = 0,
+    Playing = 1,
+    Win = 2,
+    Lose = 3,
+}
+
+/** ===================== 可调参数 ===================== */
+export const CFG = {
+    /** ---- 小球 ---- */
+    ballRadius: 18,
+    ballDensity: 1,
+    ballFriction: 0.35,
+    ballRestitution: 0.15,
+
+    /**
+     * 小球出生缩放动画（点击格子放球时由小变大）。
+     * 只作用于 Ball 的 View 子节点，**不会缩放碰撞体**。
+     * `ballSpawnScaleFrom` 设为 1 即可关闭该效果。
+     */
+    ballSpawnScaleFrom: 0.2,
+    ballSpawnDuration: 0.18,
+    /** 世界重力（仅 Y） */
+    gravityY: -900,
+
+    /** ---- 顶部格子 ----
+     * 注意：格子的**位置由场景决定**，此处不存坐标。
+     * 下面两个尺寸仅在节点缺少 UITransform 时作为兜底值。
+     */
+    blockWidth: 190,
+    blockHeight: 190,
+    /** 点击后逐球释放的间隔（秒），避免同帧重叠穿透 */
+    releaseInterval: 0.12,
+    ballsPerBlock: 9,
+
+    /* ---- V 型槽 / 汇流斜板参数已移除 ----
+     * 这些属于场景布局，现由用户在编辑器中通过 VSlot.prefab 摆放，
+     * 代码不再持有其位置、角度、尺寸。请勿在此重新添加坐标常量。
+     */
+
+    /* ---- 入口挡板参数已移除 ----
+     * 入口挡板改为 VSlot.prefab 中名为 `EntranceGate` 的子节点，
+     * 位置由用户在编辑器决定。代码只读取它，不再持有坐标。
+     */
+
+    /** ---- 轨道：圆角矩形（跑道形 / Stadium）----
+     * 不再使用椭圆公式。路径 = 上下两条水平直线 + 左右两个半圆。
+     * 位置**不写死**：上边直线的中点对齐场景中的 EntranceGate，
+     * 轨道中心 = 入口 - (0, trackCornerRadius)，运行时计算。
+     */
+    /** 水平直线段的**半长**（总宽 = 2*此值 + 2*圆角半径） */
+    trackStraightHalf: 270,
+    /** 两端圆角半径；**上下直线间距 = 2 × 此值**，越小越扁 */
+    trackCornerRadius: 40,
+    /** 轨道入口相对 EntranceGate 的微调偏移（0 = 完全对齐） */
+    trackEntryOffsetY: 0,
+    /** 找不到 EntranceGate 时的兜底入口位置（仅防止崩溃） */
+    fallbackEntryX: 0,
+    fallbackEntryY: 70,
+    /** 固定离散槽位数量（已确定规则：24），按**路径弧长**均匀分布 */
+    trackSlotCount: 24,
+    /** 轨道线速度（像素/秒，沿路径），正值顺时针 */
+    trackSpeed: 150,
+    /** 绘制轨道时的采样段数（与逻辑同用一套路径函数，保证一致） */
+    trackDrawSegments: 96,
+    /** 入口捕获区尺寸；中心运行时取 EntranceGate 位置 */
+    entryZoneWidth: 170,
+    entryZoneHeight: 90,
+    /** 空槽与入口的**弧长**容差（像素）内才允许吸附 */
+    entryArcTolerance: 34,
+    /** 吸附进入轨道的动画时长（秒） */
+    enterDuration: 0.18,
+
+    /** ---- 收纳箱（固定列 + 列内向上补位）----
+     * 布局**完全独立**于顶部 ColorBlock：列的 X 由本系统自己定义，
+     * 不读取格子坐标、不随格子数量变化。补位只改 Y，永不横移。
+     */
+    boxWidth: 108,
+    boxHeight: 96,
+    /** 第一行（每列唯一可收球的那一行）的 Y */
+    boxY: -430,
+    /** 固定列数 */
+    boxColumnCount: 4,
+    /** 列间水平间隙 */
+    boxColumnGap: 8,
+    /** 行间距 */
+    boxRowGap: 10,
+    /** 每列最多显示几行，超出的箱子隐藏（避免堆到屏幕外） */
+    boxMaxVisibleRows: 3,
+    /** 列内向上补位的平移动画时长 */
+    boxMoveDuration: 0.25,
+    /** 收纳判定：球与箱的**水平**对齐阈值（球经过箱子上方即收纳）
+     * 说明：轨道与收纳箱之间存在较大垂直间隙，用欧氏距离永远判不到，
+     * 因此改为「水平对齐 + 球处于轨道下半圈」，详见 TECH_NOTES 六.1
+     */
+    collectAlignX: 50,
+    /** 每箱容量（已确定规则：3） */
+    boxCapacity: 3,
+    /** 箱满后完成动画时长，期间不再收球 */
+    boxFinishDuration: 0.25,
+    /** 球飞入箱的动画时长 */
+    collectDuration: 0.22,
+
+    /** ---- 失败判定 ---- */
+    /** 满槽且入口有球等待，持续该秒数才判负（防瞬时误判） */
+    loseGraceTime: 1.5,
+};
+
+/** 物理分组（第一版全部使用默认分组，此处预留） */
+export const PHYS_GROUP_DEFAULT = 1 << 0;
