@@ -23,7 +23,7 @@ export class StaticPlate extends Component {
     public friction: number = 0;
 
     @property({ tooltip: '弹性系数' })
-    public restitution: number = 0.05;
+    public restitution: number = 0.15;
 
     @property({ tooltip: '没有 Sprite / Graphics 时，运行时自动画出矩形以便观察' })
     public autoDraw: boolean = true;

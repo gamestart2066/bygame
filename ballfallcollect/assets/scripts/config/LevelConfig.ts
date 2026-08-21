@@ -28,17 +28,6 @@ export enum ShuffleMode {
     Both = 'both',
 }
 
-/**
- * 难度参数。留空则使用 `CFG` 中的默认值。
- * 第一版难度只通过这些「基础量」调节，不引入道具/技能/特殊球。
- */
-export interface DifficultyParams {
-    /** 轨道线速度（px/s）：越快留给玩家的判断时间越短 */
-    trackSpeed?: number;
-    /** 满槽宽限（秒）：越小越容易判负 */
-    loseGraceTime?: number;
-}
-
 export interface LevelDef {
     levelId: number;
     name: string;
@@ -61,7 +50,6 @@ export interface LevelDef {
      * 内层 index 0 = 队首（第一行，唯一可收球的那一格）。
      */
     boxColumns?: BallColor[][];
-    difficulty: DifficultyParams;
     /** 随机种子；<=0 表示每次运行都不同 */
     seed: number;
     shuffle: ShuffleMode;
@@ -151,15 +139,6 @@ export function getLevelDef(levelId: number): LevelDef | null {
 
 export function getLevelCount(): number {
     return _levels.length;
-}
-
-/** 难度参数取值（配置优先，否则用 CFG 默认） */
-export function resolveDifficulty(def: LevelDef): Required<DifficultyParams> {
-    const d = def.difficulty ?? {};
-    return {
-        trackSpeed: d.trackSpeed ?? CFG.trackSpeed,
-        loseGraceTime: d.loseGraceTime ?? CFG.loseGraceTime,
-    };
 }
 
 /**

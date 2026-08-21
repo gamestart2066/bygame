@@ -131,7 +131,7 @@ export const CFG = {
     /** 固定离散槽位数量（已确定规则：24），按**路径弧长**均匀分布 */
     trackSlotCount: 24,
     /** 轨道线速度（像素/秒，沿路径），正值顺时针 */
-    trackSpeed: 180,
+    trackSpeed: 250,
     /** 本关所有 ColorBlock 都已点击后，轨道相对当前关卡基础速度的倍率 */
     trackAllBlocksClickedMultiplier: 2,
     /** 绘制轨道时的采样段数（与逻辑同用一套路径函数，保证一致） */
@@ -174,8 +174,8 @@ export const CFG = {
     collectDuration: 0.22,
 
     /** ---- 失败判定 ---- */
-    /** 满槽且入口有球等待，持续该秒数才判负（防瞬时误判） */
-    loseGraceTime: 1.5,
+    /** 满轨颜色死锁持续该秒数才判负（防补位/收球瞬时误判） */
+    loseGraceTime: 2.0,
 
 };
 

@@ -100,7 +100,7 @@ Game (cc.Scene)
 | 谁负责 | 内容 |
 |---|---|
 | **用户（编辑器）** | VSlot/EntranceGate/Startgridpos 的位置与尺寸、ColorBlock Prefab 尺寸、UI、美术 |
-| **LevelGrids.json** | 20 关完整数据：最多 5 列网格、颜色池、箱序模式、seed/shuffle、难度参数 |
+| **LevelGrids.json** | 20 关数据：最多 5 列网格、颜色池、箱序模式、seed/shuffle |
 | **LevelDef** | JSON 安装后的只读运行时结构；不再维护硬编码 `LEVELS` 数组 |
 | **代码** | 实例化 VSlot → 从 Startgridpos 生成网格 → 分配颜色 → 物理 → 轨道 → 收纳箱 → 胜负 |
 
@@ -139,7 +139,7 @@ ColorBlock 数量和网格形状只能来自 `play/config/LevelGrids.json`，网
 - **渲染层级 = 创建顺序**（后创建的在上层），`setupLevel()` 中固定为：
 
 ```
-SystemStatic(墙) → Track → BoxLayer → BallLayer → HUD
+SystemStatic(墙) → Track → BoxLayer → BallLayer(下落/等待) → TrackBallLayer(跳入/在轨/入箱) → HUD
       底                                      顶
 ```
   新增图层必须插入正确位置，不要图省事直接 `setParent(this.node)`
@@ -177,10 +177,11 @@ SystemStatic(墙) → Track → BoxLayer → BallLayer → HUD
 | 入口**每帧最多放行 1 球** | `handleEntry` 只处理队首 | 防止同帧多球抢占同一槽位 |
 | 槽位**立即占位** | `tryAccept` 先写 `_slots[i]` 再播吸附动画 | 动画期间槽位不能被再次分配 |
 | Gate 与轨道留缝 | 轨道上沿位于 EntranceGate 下方 `CFG.trackEntryGap`；小球以两段 Tween 上抬再落入槽位 | Gate 仍是物理挡板和捕获区中心，不随轨道视觉间隙移动 |
+| 入轨球渲染层 | `tryAccept` 成功后保世界坐标切到 `TrackBallLayer` 再 Tween | 跳入/在轨小球始终盖住 V 槽中尚未被接收的 Ball |
 | 先到先入 | `waitTicket` 自增票号排序 | 避免物理堆积顺序带来的不确定性 |
-| 失败判定带宽限 | 满槽且有球等待并持续累计 | 满槽是瞬时常态，无宽限会大量误判 |
+| 失败判定带宽限 | 满槽 + 所有已到位首箱均无法匹配任一占槽球才累计；补位/完成动画期间暂停，空列忽略 | 满槽本身不等于死锁，必须等待箱子稳定后判断颜色闭锁 |
 | 箱满后动画期不收球 | `_finished` 标志先置位 | 防止第 4 个球被收进已满的箱 |
-| 收纳箱完整显示 | `refreshColumn` 始终激活每列全部箱子，仅第一行 `collectable` | `boxVisibleRows` 旧配置不再隐藏后排箱子 |
+| 收纳箱完整显示 | `refreshColumn` 始终激活每列全部箱子，仅第一行 `collectable` | 后排展示不作为关卡难度参数 |
 
 ### 3.7 Ball 与 ColorBlock 的颜色资源规则
 

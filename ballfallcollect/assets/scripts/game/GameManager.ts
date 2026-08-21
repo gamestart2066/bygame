@@ -7,7 +7,7 @@ import { EventBus, GameEvent, GameResultData } from '../core/EventBus';
 import { ResManager } from '../core/ResManager';
 import { PrefabNames, ResPaths } from '../core/ResPaths';
 import {
-    buildLevelPlan, installLevelConfig, LevelDef, LevelGrid, LevelPlan, resolveDifficulty,
+    buildLevelPlan, installLevelConfig, LevelDef, LevelGrid, LevelPlan,
 } from '../config/LevelConfig';
 import { LevelManager } from '../config/LevelManager';
 import { LevelValidator, TerrainInfo } from '../config/LevelValidator';
@@ -63,6 +63,8 @@ export class GameManager extends Component {
     private _boxLayer: Node | null = null;
     private _ballLayer: Node | null = null;
     private _ballLayerUI: UITransform | null = null;
+    /** 已被轨道接收的 Ball 专用渲染层，始终位于仍在 V 槽等待的 BallLayer 上方。 */
+    private _trackBallLayer: Node | null = null;
 
     private _collected: number = 0;
     private _ticketSeq: number = 0;
@@ -110,7 +112,6 @@ export class GameManager extends Component {
         this._def = def;
         EventBus.emit(GameEvent.LevelLoadStart, { levelId: def.levelId });
 
-        this.applyDifficulty(def);
         this.setupPhysics();
         this.buildLayers();
 
@@ -195,13 +196,6 @@ export class GameManager extends Component {
         return true;
     }
 
-    /** 把关卡难度参数写入运行时配置 */
-    private applyDifficulty(def: LevelDef): void {
-        const d = resolveDifficulty(def);
-        CFG.trackSpeed = d.trackSpeed;
-        CFG.loseGraceTime = d.loseGraceTime;
-    }
-
     private setupPhysics(): void {
         const phys = PhysicsSystem2D.instance;
         phys.enable = true;
@@ -213,8 +207,8 @@ export class GameManager extends Component {
 
     /**
      * 渲染层级约定（同父节点下，后创建 = 更靠上）：
-     *   SystemStatic → TerrainLayer/Track → BoxLayer → BallLayer → UIRoot
-     * BallLayer 必须晚于 BoxLayer，收纳动画中的球才会盖在箱子之上。
+     *   SystemStatic → TerrainLayer/Track → BoxLayer → BallLayer → TrackBallLayer → UIRoot
+     * TrackBallLayer 保证跳入/在轨/入箱的小球盖住仍在 V 槽等待的小球。
      */
     private buildLayers(): void {
         if (this.autoCreateWalls) {
@@ -238,6 +232,11 @@ export class GameManager extends Component {
         this._ballLayerUI = this._ballLayer.addComponent(UITransform);
         this._ballLayer.setParent(this.node);
         this._ballLayer.setPosition(0, 0, 0);
+
+        this._trackBallLayer = new Node('TrackBallLayer');
+        this._trackBallLayer.addComponent(UITransform);
+        this._trackBallLayer.setParent(this.node);
+        this._trackBallLayer.setPosition(0, 0, 0);
     }
 
     /** 由 JSON 网格生成本关唯一 VSlot 与 ColorBlock 网格。 */
@@ -540,7 +539,7 @@ export class GameManager extends Component {
         if (waiting.length === 0) return;
 
         waiting.sort((a, b) => a.waitTicket - b.waitTicket);
-        if (this._track.tryAccept(waiting[0])) {
+        if (this._track.tryAccept(waiting[0], this._trackBallLayer)) {
             this.releaseUntrackedReservation();
             this.emitProgress();
         }
@@ -602,15 +601,29 @@ export class GameManager extends Component {
             return;
         }
 
-        const hasWaiting = this._balls.some(
-            (b) => b.state === BallState.Waiting && this.inEntryZone(b.node.position)
-        );
-        if (this._track.isFull() && hasWaiting) {
+        if (this._track.isFull() && this.isTrackColorBlocked()) {
             this._blockedTime += dt;
             if (this._blockedTime >= CFG.loseGraceTime) this.finish(false);
         } else {
             this._blockedTime = 0;
         }
+    }
+
+    /**
+     * 颜色死锁：所有非空列的第一行箱子均已完成补位，且轨道中没有任何球
+     * 能被这些箱子接收。空列忽略；任一首箱仍在补位/完成动画时暂不判负。
+     */
+    private isTrackColorBlocked(): boolean {
+        if (!this._track) return false;
+        const firstRow = this.getFirstRowBoxes();
+        if (firstRow.length === 0) return false;
+        if (firstRow.some((box) => !box.isReadyForMatchCheck())) return false;
+
+        const occupied = this._track.getOccupiedBalls();
+        if (occupied.length === 0) return false;
+        return !occupied.some((ball) =>
+            firstRow.some((box) => box.canAccept(ball.colorId))
+        );
     }
 
     private finish(win: boolean): void {

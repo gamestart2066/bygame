@@ -208,13 +208,19 @@ export class TrackSystem extends Component {
      * 尝试让小球进入轨道。
      * @returns 成功返回 true；满槽或当前无空槽经过入口返回 false
      */
-    public tryAccept(ball: Ball): boolean {
+    public tryAccept(ball: Ball, renderLayer?: Node | null): boolean {
         if (this.isFull()) return false;
         const slot = this.findEntrySlot();
         if (slot < 0) return false;
 
         // 立即占位，防止同帧内多个球抢占同一槽
         this._slots[slot] = ball;
+        if (renderLayer && renderLayer.isValid && ball.node.parent !== renderLayer) {
+            // 先保存世界位置再换层，跳入动画起点不能因渲染层切换而移动。
+            const worldPos = ball.node.worldPosition.clone();
+            ball.node.setParent(renderLayer);
+            ball.node.setWorldPosition(worldPos);
+        }
         ball.enterTrack(
             slot,
             this.getFutureSlotPos(slot, CFG.enterDuration),
@@ -237,6 +243,11 @@ export class TrackSystem extends Component {
             if (s && s.isOnTrack()) out.push(s);
         }
         return out;
+    }
+
+    /** 所有已占槽的小球，包含正在跳入轨道但尚未到位的 Ball。 */
+    public getOccupiedBalls(): Ball[] {
+        return this._slots.filter((ball): ball is Ball => !!ball && ball.isValid && !ball.isRecycled);
     }
 
     protected update(dt: number): void {

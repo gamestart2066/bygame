@@ -128,6 +128,11 @@ export class CollectBox extends Component {
         return this._collectable;
     }
 
+    /** 判负匹配检查只能使用已完成补位、尚未结束的第一行箱子。 */
+    public isReadyForMatchCheck(): boolean {
+        return this._collectable && this._inPosition && !this._finished;
+    }
+
     public getPos(): Vec3 {
         return this.node.position.clone();
     }
