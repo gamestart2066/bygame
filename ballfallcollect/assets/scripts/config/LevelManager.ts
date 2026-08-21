@@ -1,17 +1,16 @@
-import { ResPaths } from '../core/ResPaths';
-import { getLevelCount, getLevelDef, LEVELS, LevelDef } from './LevelConfig';
+import { getAllLevelDefs, getLevelCount, getLevelDef, LevelDef } from './LevelConfig';
 
 /**
  * 关卡管理：当前关卡、解锁进度、地形资源路径。
  *
- * 只负责「哪一关」和「配置在哪」，**不负责实例化**，
+ * 只负责「哪一关」和配置选择，**不负责实例化**，
  * 也不碰任何节点 —— 实例化由 GameManager 在 Game 场景中完成。
  */
 export class LevelManager {
     private static readonly SAVE_KEY = 'bfc_progress';
 
-    private static _currentId: number = LEVELS.length > 0 ? LEVELS[0].levelId : 1;
-    private static _maxUnlockedId: number = LEVELS.length > 0 ? LEVELS[0].levelId : 1;
+    private static _currentId: number = 1;
+    private static _maxUnlockedId: number = 1;
     private static _loaded: boolean = false;
 
     // ==================== 进度 ====================
@@ -35,8 +34,9 @@ export class LevelManager {
             console.warn('[LevelManager] 进度读取失败，使用默认进度。');
         }
         // 防御：配置表变动后进度越界
-        if (!getLevelDef(this._currentId)) this._currentId = LEVELS[0]?.levelId ?? 1;
-        if (!getLevelDef(this._maxUnlockedId)) this._maxUnlockedId = LEVELS[0]?.levelId ?? 1;
+        const levels = getAllLevelDefs();
+        if (!getLevelDef(this._currentId)) this._currentId = levels[0]?.levelId ?? 1;
+        if (!getLevelDef(this._maxUnlockedId)) this._maxUnlockedId = levels[0]?.levelId ?? 1;
     }
 
     private static save(): void {
@@ -80,9 +80,10 @@ export class LevelManager {
 
     /** 通关后调用：解锁下一关 */
     public static markCleared(levelId: number): void {
-        const idx = LEVELS.findIndex((l) => l.levelId === levelId);
+        const levels = getAllLevelDefs();
+        const idx = levels.findIndex((l) => l.levelId === levelId);
         if (idx < 0) return;
-        const next = LEVELS[idx + 1];
+        const next = levels[idx + 1];
         if (next && next.levelId > this._maxUnlockedId) {
             this._maxUnlockedId = next.levelId;
         }
@@ -90,15 +91,17 @@ export class LevelManager {
     }
 
     public static hasNext(): boolean {
-        const idx = LEVELS.findIndex((l) => l.levelId === this._currentId);
-        return idx >= 0 && idx + 1 < LEVELS.length;
+        const levels = getAllLevelDefs();
+        const idx = levels.findIndex((l) => l.levelId === this._currentId);
+        return idx >= 0 && idx + 1 < levels.length;
     }
 
     /** 切到下一关；已是最后一关则返回 false */
     public static goNext(): boolean {
-        const idx = LEVELS.findIndex((l) => l.levelId === this._currentId);
-        if (idx < 0 || idx + 1 >= LEVELS.length) return false;
-        return this.setCurrent(LEVELS[idx + 1].levelId);
+        const levels = getAllLevelDefs();
+        const idx = levels.findIndex((l) => l.levelId === this._currentId);
+        if (idx < 0 || idx + 1 >= levels.length) return false;
+        return this.setCurrent(levels[idx + 1].levelId);
     }
 
     public static get totalLevels(): number {
@@ -106,15 +109,7 @@ export class LevelManager {
     }
 
     public static getAllLevels(): ReadonlyArray<LevelDef> {
-        return LEVELS;
+        return getAllLevelDefs();
     }
 
-    // ==================== 资源路径 ====================
-
-    /** 当前关卡地形的 resources 路径 */
-    public static terrainPath(def?: LevelDef | null): string | null {
-        const d = def ?? this.getCurrentDef();
-        if (!d) return null;
-        return ResPaths.terrain(d.terrain);
-    }
 }

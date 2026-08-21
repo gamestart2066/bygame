@@ -128,12 +128,21 @@ export class Ball extends Component {
     public enterTrack(slotIndex: number, targetPos: Vec3, onDone: () => void): void {
         if (this._recycled) return;
         const token = this._lifecycleToken;
+        const startPos = this.node.position.clone();
+        const apexPos = new Vec3(
+            (startPos.x + targetPos.x) * 0.5,
+            Math.max(startPos.y, targetPos.y) + CFG.enterJumpHeight,
+            targetPos.z
+        );
+        const riseDuration = CFG.enterDuration * 0.45;
+        const fallDuration = CFG.enterDuration - riseDuration;
         this.state = BallState.Entering;
         this.slotIndex = slotIndex;
         this.disablePhysics();
         Tween.stopAllByTarget(this.node);
         tween(this.node)
-            .to(CFG.enterDuration, { position: targetPos }, { easing: 'quadOut' })
+            .to(riseDuration, { position: apexPos }, { easing: 'quadOut' })
+            .to(fallDuration, { position: targetPos }, { easing: 'quadIn' })
             .call(() => {
                 if (!this.isCurrent(token)) return;
                 this.state = BallState.OnTrack;

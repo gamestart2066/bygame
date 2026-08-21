@@ -1,7 +1,7 @@
 import { BallColor, CFG } from '../core/GameTypes';
-import { BoxFillMode, isValidColor, LevelDef, LevelPlan } from './LevelConfig';
+import { BoxFillMode, isValidColor, LevelDef, LevelGrid, LevelPlan } from './LevelConfig';
 
-/** 地形预制体的实际内容统计（由 TerrainRoot 提供） */
+/** 按关卡配置生成后的运行时地形统计。 */
 export interface TerrainInfo {
     terrainName: string;
     blockCount: number;
@@ -27,10 +27,19 @@ export interface ValidationResult {
  */
 export class LevelValidator {
 
-    public static validate(def: LevelDef, plan: LevelPlan, terrain: TerrainInfo): ValidationResult {
+    public static validateGrid(def: LevelDef, grid: LevelGrid): string[] {
+        const errors: string[] = [];
+        this.checkGrid(def, grid, errors);
+        return errors;
+    }
+
+    public static validate(
+        def: LevelDef, grid: LevelGrid, plan: LevelPlan, terrain: TerrainInfo
+    ): ValidationResult {
         const errors: string[] = [];
         const warnings: string[] = [];
 
+        errors.push(...this.validateGrid(def, grid));                    // 网格配置
         this.checkTerrainComponents(terrain, errors, warnings);          // ⑦
         this.checkBlockColors(plan, errors);                             // ①
         this.checkBallCounts(plan, errors, warnings);                    // ②
@@ -54,6 +63,49 @@ export class LevelValidator {
         return { ok: errors.length === 0, errors, warnings };
     }
 
+    /** 网格最多 5 列；每行 1 必须连续靠左，且有效宽度从上到下不得增加。 */
+    private static checkGrid(def: LevelDef, grid: LevelGrid, errors: string[]): void {
+        if (!Array.isArray(grid) || grid.length === 0) {
+            errors.push(`ColorBlock 网格 ${def.gridId} 不能为空。`);
+            return;
+        }
+        const columns = grid[0]?.length ?? 0;
+        if (columns <= 0 || columns > 5) {
+            errors.push(`ColorBlock 网格列数必须为 1～5，当前为 ${columns}。`);
+            return;
+        }
+
+        let previousWidth = columns;
+        for (let rowIndex = 0; rowIndex < grid.length; rowIndex++) {
+            const row = grid[rowIndex];
+            if (!Array.isArray(row) || row.length !== columns) {
+                errors.push(`网格第 ${rowIndex + 1} 行长度必须等于 ${columns}。`);
+                continue;
+            }
+            let width = 0;
+            let reachedEmpty = false;
+            for (let col = 0; col < row.length; col++) {
+                const cell = row[col];
+                if (cell !== 0 && cell !== 1) {
+                    errors.push(`网格第 ${rowIndex + 1} 行第 ${col + 1} 列只能填 0 或 1。`);
+                    continue;
+                }
+                if (cell === 0) reachedEmpty = true;
+                else {
+                    if (reachedEmpty) {
+                        errors.push(`网格第 ${rowIndex + 1} 行存在内部空洞；空位只能在右侧外围。`);
+                    }
+                    width++;
+                }
+            }
+            if (width <= 0) errors.push(`网格第 ${rowIndex + 1} 行没有 ColorBlock。`);
+            if (width > previousWidth) {
+                errors.push(`网格第 ${rowIndex + 1} 行比上一行更宽；空位只能向右下外围扩展。`);
+            }
+            previousWidth = width;
+        }
+    }
+
     /** ⑦ Terrain Prefab 是否缺少必要组件 */
     private static checkTerrainComponents(t: TerrainInfo, errors: string[], warnings: string[]): void {
         if (t.blockCount <= 0) {
@@ -71,11 +123,6 @@ export class LevelValidator {
         if (t.entranceGateCount > 1) {
             warnings.push(
                 `地形中存在 ${t.entranceGateCount} 个 EntranceGate，只会采用最低的那个作为轨道入口。`
-            );
-        }
-        if (t.vslotCount !== t.blockCount) {
-            warnings.push(
-                `格子数(${t.blockCount}) 与 VSlot 数(${t.vslotCount}) 不一致，请确认布局是否符合预期。`
             );
         }
     }

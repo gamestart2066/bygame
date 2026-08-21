@@ -17,16 +17,18 @@ const { ccclass, property } = _decorator;
  *   VSlot                [UITransform, VSlot]
  *   ├─ PlateL            [UITransform, Sprite, (StaticPlate 可自动补)]
  *   ├─ PlateR            [UITransform, Sprite, (StaticPlate 可自动补)]
- *   └─ EntranceGate      [UITransform, Sprite, (StaticPlate 可自动补)]
+ *   ├─ EntranceGate      [UITransform, Sprite, (StaticPlate 可自动补)]
+ *   └─ Startgridpos      [UITransform，仅作 ColorBlock 网格底部中心锚点]
  *
  * `EntranceGate` 有双重作用：
  *   1) 物理挡板：无空槽时小球停在其上堆积等待
- *   2) **轨道入口参考点**：椭圆轨道的入口对齐它的位置
+ *   2) **轨道入口参考点**：跑道形轨道的入口对齐它的位置
  */
 @ccclass('VSlot')
 export class VSlot extends Component {
     /** 入口挡板的固定节点名，代码按此名称查找 */
     public static readonly ENTRANCE_GATE_NAME: string = 'EntranceGate';
+    public static readonly GRID_START_NAME: string = 'Startgridpos';
 
     @property({ tooltip: '自动为所有子节点补挂 StaticPlate（生成静态碰撞体）' })
     public autoSetupChildren: boolean = true;
@@ -38,6 +40,7 @@ export class VSlot extends Component {
     /** 为每个子节点补上 StaticPlate，使其成为静态物理板 */
     private setupChildren(): void {
         for (const child of this.node.children) {
+            if (child.name === VSlot.GRID_START_NAME) continue;
             if (!child.activeInHierarchy) continue;
             if (!child.getComponent(UITransform)) continue;
             if (!child.getComponent(StaticPlate)) {
@@ -46,7 +49,7 @@ export class VSlot extends Component {
         }
     }
 
-    /** 世界坐标（供统计/日志使用，代码不用它做布局决策） */
+    /** 世界坐标（供统计/日志使用） */
     public getWorldPos(): Vec3 {
         return this.node.worldPosition.clone();
     }
@@ -63,6 +66,10 @@ export class VSlot extends Component {
     public getEntranceWorldPos(): Vec3 | null {
         const gate = this.getEntranceGate();
         return gate ? gate.worldPosition.clone() : null;
+    }
+
+    public getGridStart(): Node | null {
+        return this.node.getChildByName(VSlot.GRID_START_NAME);
     }
 
     /** 子板数量，用于校验 Prefab 是否配置正确 */

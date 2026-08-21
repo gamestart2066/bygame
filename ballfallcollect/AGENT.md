@@ -92,7 +92,7 @@ assets/
 │  └─ scene/    SceneRouter · LoadingEntry · HallEntry · GameEntry
 └─ play/        ★ Bundle（isBundle=true，包名 "play"）
    ├─ map/      地形预制体
-   ├─ prefab/   Ball.prefab · ColorBlock.prefab · VSlot.prefab
+   ├─ prefab/   Ball.prefab · ColorBlock.prefab · VSlot.prefab · CollectBox.prefab
    └─ ui/       PauseUI.prefab · ResultUI.prefab（动态 Popup）
 ```
 
@@ -137,8 +137,8 @@ AI 看不到游戏画面：
 3. 不手动编辑生成物：`library/`、`temp/`、`profiles/`
 4. 新增引擎模块前必须说明原因并获得确认
 5. 删除文件必须用户明确点名，禁止为「清理」而删
-6. **🚫 禁止用代码决定场景布局**
-   - 不在脚本中写死格子 / V 槽 / 关卡元素的坐标、行列、数量、自动排列
-   - 布局由用户在编辑器摆放，代码只**扫描**场景中实际存在的节点
-   - 需要新的可摆放元素时，做成「组件 + 用户摆放」，不做成「代码生成」
-   - 详见 `.agent/TECH_NOTES.md` 场景驱动架构
+6. **🚫 禁止在代码中散写场景坐标**
+   - V 槽、EntranceGate、Startgridpos 等空间基准由用户在 Prefab 中摆放
+   - ColorBlock 是明确例外：数量/空位来自 `play/config/LevelGrids.json`，LevelDef 只保存 gridId；以 Startgridpos 为底部中心按 CFG 间距运行时生成
+   - 网格之外的新布局仍优先采用「Prefab 实体 + 用户摆放/配置」，不得在 GameManager 散写坐标
+   - 详见 `.agent/TECH_NOTES.md` 配置驱动地形架构

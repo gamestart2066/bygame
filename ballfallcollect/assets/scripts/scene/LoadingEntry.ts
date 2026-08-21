@@ -1,8 +1,9 @@
-import { _decorator, Component, Prefab } from 'cc';
+import { _decorator, Component, JsonAsset, Prefab } from 'cc';
 import { EventBus, GameEvent } from '../core/EventBus';
 import { ResManager } from '../core/ResManager';
 import { PrefabNames, ResPaths, SceneNames, UIPrefabs } from '../core/ResPaths';
 import { LevelManager } from '../config/LevelManager';
+import { installLevelConfig } from '../config/LevelConfig';
 import { UIManager } from '../ui/UIManager';
 import { SceneRouter } from './SceneRouter';
 
@@ -42,10 +43,9 @@ export class LoadingEntry extends Component {
         UIManager.init(this.node);
 
         this.report(0, '正在初始化…');
-        this.initSystems();
-
         await this.loadBundles();
         await this.loadResources();
+        this.initSystems();
         await this.preloadHall();
 
         this.report(1, '即将进入大厅');
@@ -56,6 +56,10 @@ export class LoadingEntry extends Component {
 
     /** 1. 基础系统初始化 */
     private initSystems(): void {
+        const config = ResManager.getCached<JsonAsset>(ResPaths.levelGrids);
+        if (!config || !installLevelConfig(config.json)) {
+            console.error('[LoadingEntry] LevelGrids.json 缺少合法的 levels 数组。');
+        }
         LevelManager.init();
     }
 
@@ -67,24 +71,24 @@ export class LoadingEntry extends Component {
         if (!ok) {
             console.error(
                 `[LoadingEntry] 资源包 "${ResPaths.defaultBundle}" 加载失败，` +
-                '地形与 UI 预制体都将取不到。请确认 assets/play 目录已勾选为 Bundle。'
+                '玩法与 UI 预制体都将取不到。请确认 assets/play 目录已勾选为 Bundle。'
             );
         }
         this.report(this.bundleWeight, '资源包就绪');
     }
 
-    /** 3. 加载必要资源（当前关卡地形 + 可选的 UI 面板） */
+    /** 3. 加载必要玩法 Prefab + 可选 UI 面板 */
     private async loadResources(): Promise<void> {
         const items: Array<{
             path: string; type: any; optional?: boolean;
         }> = [];
 
-        // 当前关卡地形：必需
-        const terrain = LevelManager.terrainPath();
-        if (terrain) items.push({ path: terrain, type: Prefab });
-
-        // 正式 Ball 的唯一来源：必需资源，缺失时 GameManager 会明确阻止开局。
+        // 正式玩法对象的唯一 Prefab 来源；地形空间由关卡网格配置生成。
         items.push({ path: ResPaths.prefab(PrefabNames.Ball), type: Prefab });
+        items.push({ path: ResPaths.prefab(PrefabNames.ColorBlock), type: Prefab });
+        items.push({ path: ResPaths.prefab(PrefabNames.VSlot), type: Prefab });
+        items.push({ path: ResPaths.prefab(PrefabNames.CollectBox), type: Prefab });
+        items.push({ path: ResPaths.levelGrids, type: JsonAsset });
 
         // UI 面板预制体：可选（play/ui 目录尚未创建，缺失时 UIManager 用代码兜底）
         for (const key of Object.keys(UIPrefabs) as Array<keyof typeof UIPrefabs>) {

@@ -18,13 +18,13 @@ export const Bundles = {
 
 /**
  * Bundle 内的子目录约定 —— 与磁盘实际结构一致：
- *   assets/play/map/     地形预制体
- *   assets/play/prefab/  通用预制体（ColorBlock / VSlot）
- *   assets/play/ui/      UI 预制体（**尚未创建**，缺失时 UIManager 自动走代码兜底）
+ *   assets/play/prefab/  通用预制体（Ball / ColorBlock / VSlot / CollectBox）
+ *   assets/play/config/  JSON 关卡数据
+ *   assets/play/ui/      UI 预制体
  */
 export const ResDirs = {
-    terrain: 'map',
     prefab: 'prefab',
+    config: 'config',
     ui: 'ui',
     audio: 'audio',
     texture: 'texture',
@@ -40,6 +40,8 @@ export const SceneNames = {
 /** 通用 Prefab 文件名。路径统一由 ResPaths.prefab() 生成。 */
 export const PrefabNames = {
     Ball: 'Ball',
+    ColorBlock: 'ColorBlock',
+    VSlot: 'VSlot',
     CollectBox: 'CollectBox',
 } as const;
 
@@ -47,14 +49,12 @@ export const ResPaths = {
     /** 默认从哪个 Bundle 取资源 */
     defaultBundle: Bundles.play as string,
 
-    /** 地形：play/map/<name> */
-    terrain(name: string): string {
-        return `${ResDirs.terrain}/${name}`;
-    },
     /** 通用预制体：play/prefab/<name> */
     prefab(name: string): string {
         return `${ResDirs.prefab}/${name}`;
     },
+    /** ColorBlock 网格 JSON：play/config/LevelGrids.json */
+    levelGrids: 'config/LevelGrids',
     /** UI 预制体：play/ui/<name>（目前目录不存在，属于可选资源） */
     ui(name: string): string {
         return `${ResDirs.ui}/${name}`;

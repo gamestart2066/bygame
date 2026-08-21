@@ -5,7 +5,8 @@ import { VSlot } from './VSlot';
 const { ccclass, property } = _decorator;
 
 /**
- * 地形根组件 —— 挂在每个 `LevelTerrain_XX.prefab` 的**根节点**上。
+ * 旧 Terrain Prefab 兼容组件。正式关卡现由 LevelGrids.json + VSlot/ColorBlock Prefab 生成，
+ * GameManager 不再读取本组件；暂时保留文件，避免破坏旧资源引用。
  *
  * ============ Terrain Prefab 约定 ============
  * LevelTerrain_XX            [TerrainRoot]      ← 根节点，必须挂本组件
@@ -71,8 +72,7 @@ export class TerrainRoot extends Component {
     }
 
     /**
-     * 在场景中查找已存在的地形根（用于「地形已直接摆在场景里」的情形，
-     * 例如当前的 test.scene）。
+     * 旧调试场景兼容查询；正式 Game 流程不再调用。
      */
     public static findInScene(root: Node): TerrainRoot | null {
         return root.getComponentInChildren(TerrainRoot);

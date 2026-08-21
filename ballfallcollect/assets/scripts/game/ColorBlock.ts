@@ -10,7 +10,7 @@ const { ccclass, property } = _decorator;
  * 顶部彩色格子。
  *
  * 职责边界（重要）：
- * - **节点的位置 / 大小 / 数量全部由用户在编辑器摆放决定**，代码不做任何布局计算
+ * - 节点大小来自 Prefab；数量与网格位置由 LevelGrids.json + Startgridpos 在运行时生成
  * - 颜色由 GameManager 在运行时通过 setup() 分配（用户无需在编辑器配色）
  * - 每个格子固定产出 CFG.ballsPerBlock（9）个同色球
  *
@@ -29,8 +29,14 @@ export class ColorBlock extends Component {
     private _releasing: boolean = false;
     /** 本关是否至少成功触发过一次点击释放。 */
     private _hasBeenClicked: boolean = false;
+    /** 是否已由网格解锁；锁定时触摸不生效并显示 Lid。 */
+    private _clickEnabled: boolean = false;
     private _background: Node | null = null;
     private _bgSprite: Sprite | null = null;
+    private _lid: Node | null = null;
+    private _lidSprite: Sprite | null = null;
+    private _baseScale: Vec3 = new Vec3(1, 1, 1);
+    private _lidBaseScale: Vec3 = new Vec3(1, 1, 1);
     private _slotNodes: Node[] = [];
     private _slotSprites: Sprite[] = [];
     private _slotPositions: Vec3[] = [];
@@ -42,6 +48,8 @@ export class ColorBlock extends Component {
     private _pendingReleases: number = 0;
     /** 展示球动画结束后的回调：(color, 动画终点世界坐标) */
     private _onRelease: ((color: BallColor, spawnWorldPos: Vec3) => boolean) | null = null;
+    private _onActivated: ((blockIndex: number) => void) | null = null;
+    private _canActivate: (() => boolean) | null = null;
 
     /**
      * 由 GameManager 在扫描到本格子后调用，分配颜色并激活。
@@ -50,7 +58,9 @@ export class ColorBlock extends Component {
     public setup(
         color: BallColor,
         index: number,
-        onRelease: (color: BallColor, spawnWorldPos: Vec3) => boolean
+        onRelease: (color: BallColor, spawnWorldPos: Vec3) => boolean,
+        onActivated: (blockIndex: number) => void,
+        canActivate: () => boolean,
     ): void {
         this.colorId = color;
         this.blockIndex = index;
@@ -58,7 +68,10 @@ export class ColorBlock extends Component {
         this._nextSlotIndex = this.remaining - 1;
         this._pendingReleases = 0;
         this._hasBeenClicked = false;
+        this._clickEnabled = false;
         this._onRelease = onRelease;
+        this._onActivated = onActivated;
+        this._canActivate = canActivate;
         this._initialized = true;
 
         this._background = this.node.getChildByPath('Background');
@@ -66,6 +79,14 @@ export class ColorBlock extends Component {
             this._bgSprite = this._background.getComponent(Sprite) ?? this._background.addComponent(Sprite);
         } else {
             console.warn('[ColorBlock] 未找到 Background 子节点，背景将不会染色。');
+        }
+
+        this._lid = this.node.getChildByName('Lid');
+        this._lidSprite = this._lid?.getComponent(Sprite) ?? null;
+        this._baseScale = this.node.scale.clone();
+        this._lidBaseScale = this._lid?.scale.clone() ?? new Vec3(1, 1, 1);
+        if (!this._lid || !this._lidSprite) {
+            console.warn('[ColorBlock] 未找到 Lid(Sprite)，锁定遮罩将无法显示。');
         }
 
         const slots = this.node.getChildByPath('Slots');
@@ -97,8 +118,11 @@ export class ColorBlock extends Component {
 
     /** 开始释放：逐球间隔投放，避免同帧重叠导致物理爆炸 */
     public startRelease(): void {
-        if (!this._initialized || this._releasing || this.remaining <= 0) return;
+        if (!this._initialized || !this._clickEnabled || this._releasing || this.remaining <= 0) return;
+        if (this._canActivate && !this._canActivate()) return;
         this._hasBeenClicked = true;
+        const activated = this._onActivated;
+        if (activated) activated(this.blockIndex);
         this._releasing = true;
         this._releaseToken++;
         this.startNextDisplayRelease(this._releaseToken);
@@ -266,10 +290,65 @@ export class ColorBlock extends Component {
         return this._hasBeenClicked;
     }
 
+    public setClickEnabled(enabled: boolean): void {
+        if (this._clickEnabled === enabled) {
+            this.redrawLid();
+            return;
+        }
+        this._clickEnabled = enabled;
+        if (enabled) this.playUnlockTweens();
+        else this.restoreLockedVisual();
+    }
+
+    /** 解锁时并行播放：格子脉冲 + Lid 缩小消失。 */
+    private playUnlockTweens(): void {
+        Tween.stopAllByTarget(this.node);
+        this.node.setScale(this._baseScale);
+        const pulse = CFG.colorBlockUnlockPulseScale;
+        const halfDuration = CFG.colorBlockUnlockPulseDuration * 0.5;
+        tween(this.node)
+            .to(halfDuration, {
+                scale: new Vec3(
+                    this._baseScale.x * pulse,
+                    this._baseScale.y * pulse,
+                    this._baseScale.z,
+                ),
+            }, { easing: 'quadOut' })
+            .to(halfDuration, { scale: this._baseScale.clone() }, { easing: 'quadIn' })
+            .start();
+
+        if (!this._lid) return;
+        Tween.stopAllByTarget(this._lid);
+        this.redrawLidColor();
+        this._lid.setScale(this._lidBaseScale);
+        this._lid.active = true;
+        tween(this._lid)
+            .to(CFG.colorBlockLidHideDuration, {
+                scale: new Vec3(0, 0, this._lidBaseScale.z),
+            }, { easing: 'quadIn' })
+            .call(() => {
+                if (!this._lid?.isValid || !this._clickEnabled) return;
+                this._lid.active = false;
+                this._lid.setScale(this._lidBaseScale);
+            })
+            .start();
+    }
+
+    private restoreLockedVisual(): void {
+        Tween.stopAllByTarget(this.node);
+        this.node.setScale(this._baseScale);
+        if (!this._lid) return;
+        Tween.stopAllByTarget(this._lid);
+        this._lid.setScale(this._lidBaseScale);
+        this.redrawLidColor();
+        this._lid.active = true;
+    }
+
     /** 更新格子：只使用 Prefab 中已有的 Background 与 Slot Sprite。 */
     private redraw(): void {
         this.redrawBackground();
         this.redrawDots();
+        this.redrawLid();
     }
 
     /** 背景染色：直接设置 Background 节点上 Sprite 的颜色，不再用 Graphics 计算绘制 */
@@ -297,14 +376,39 @@ export class ColorBlock extends Component {
         }
     }
 
+    /** Lid 使用本格颜色；锁定时显示，解锁后隐藏。 */
+    private redrawLid(): void {
+        if (!this._lid) return;
+        this.redrawLidColor();
+        if (!this._clickEnabled) {
+            this._lid.setScale(this._lidBaseScale);
+            this._lid.active = true;
+        } else if (!this._lid.active) {
+            this._lid.active = false;
+        }
+    }
+
+    private redrawLidColor(): void {
+        const base = getColor(this.colorId);
+        if (this._lidSprite) {
+            this._lidSprite.color = new Color(base.r, base.g, base.b, this._lidSprite.color.a);
+        }
+    }
+
     /** 胜负、Restart 或销毁前取消尚未执行的逐球释放。 */
     public stopRelease(): void {
         this.unscheduleAllCallbacks();
+        Tween.stopAllByTarget(this.node);
+        if (this._lid) Tween.stopAllByTarget(this._lid);
+        this.node.setScale(this._baseScale);
+        if (this._lid?.isValid) this._lid.setScale(this._lidBaseScale);
         this._releaseToken++;
         this._releasing = false;
         this._pendingReleases = 0;
         this._nextSlotIndex = this.remaining - 1;
         this._onRelease = null;
+        this._onActivated = null;
+        this._canActivate = null;
         for (let i = 0; i < this._slotNodes.length; i++) {
             this.restoreSlot(i, i < this.remaining);
         }
@@ -315,9 +419,13 @@ export class ColorBlock extends Component {
         // Scene teardown 已进入节点预销毁阶段，子 Slot 的内部 Transform 可能已被清空。
         // 此处只能失效异步任务与释放引用，不能再 setPosition/setScale/active。
         this.unscheduleAllCallbacks();
+        Tween.stopAllByTarget(this.node);
+        if (this._lid) Tween.stopAllByTarget(this._lid);
         this._releaseToken++;
         this._releasing = false;
         this._onRelease = null;
+        this._onActivated = null;
+        this._canActivate = null;
         this.node.off(Node.EventType.TOUCH_END, this.onTouch, this);
     }
 }

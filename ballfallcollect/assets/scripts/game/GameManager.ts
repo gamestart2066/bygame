@@ -1,20 +1,21 @@
 import {
-    _decorator, Component, Node, Vec2, Vec3, UITransform, Prefab,
-    PhysicsSystem2D, EPhysics2DDrawFlags, director,
+    _decorator, Component, Node, Vec2, Vec3, UITransform, Prefab, JsonAsset, instantiate,
+    PhysicsSystem2D, EPhysics2DDrawFlags,
 } from 'cc';
 import { BallColor, BallState, CFG, GameState } from '../core/GameTypes';
 import { EventBus, GameEvent, GameResultData } from '../core/EventBus';
 import { ResManager } from '../core/ResManager';
 import { PrefabNames, ResPaths } from '../core/ResPaths';
-import { buildLevelPlan, LevelDef, LevelPlan, resolveDifficulty } from '../config/LevelConfig';
+import {
+    buildLevelPlan, installLevelConfig, LevelDef, LevelGrid, LevelPlan, resolveDifficulty,
+} from '../config/LevelConfig';
 import { LevelManager } from '../config/LevelManager';
-import { LevelValidator } from '../config/LevelValidator';
+import { LevelValidator, TerrainInfo } from '../config/LevelValidator';
 import { Ball } from './Ball';
 import { BallPool } from './BallPool';
 import { ColorBlock } from './ColorBlock';
 import { CollectBox } from './CollectBox';
 import { TrackSystem } from './TrackSystem';
-import { TerrainRoot } from './TerrainRoot';
 import { VSlot } from './VSlot';
 import { createWalls } from './StaticBuilder';
 
@@ -24,9 +25,9 @@ const { ccclass, property } = _decorator;
  * 游戏主控（玩法层）。
  *
  * ============ 职责边界 ============
- * 【地形 Prefab】格子/V槽/EntranceGate 的数量与坐标 —— 用户在编辑器决定
- * 【LevelConfig】颜色、箱子列排列、难度、随机方式 —— 配置表决定
- * 【本脚本】    加载地形 → 校验 → 分配颜色 → 生成球 → 轨道 → 收纳 → 胜负
+ * 【VSlot Prefab】汇流物理结构、EntranceGate、Startgridpos —— 用户在编辑器决定
+ * 【LevelConfig】ColorBlock 网格、颜色、箱子列、难度、随机方式 —— 配置表决定
+ * 【本脚本】    实例化 VSlot/网格 → 校验 → 分配颜色 → 物理 → 轨道 → 收纳 → 胜负
  * 【UI】        通过 EventBus 接收事件自行显示，本脚本**不操作任何 Label/Button**
  * ==================================
  */
@@ -43,8 +44,9 @@ export class GameManager extends Component {
     private _plan: LevelPlan | null = null;
     private _def: LevelDef | null = null;
 
-    private _terrain: TerrainRoot | null = null;
     private _blocks: ColorBlock[] = [];
+    private _blockGridCoords: Array<{ row: number; col: number }> = [];
+    private _blockIndexByCell: Map<string, number> = new Map();
     private _vslots: VSlot[] = [];
     /** 全局查询集合（补位逻辑不以它为准） */
     private _boxes: CollectBox[] = [];
@@ -54,6 +56,8 @@ export class GameManager extends Component {
     private _balls: Ball[] = [];
     private _ballPool: BallPool = new BallPool();
     private _collectBoxPrefab: Prefab | null = null;
+    private _colorBlockPrefab: Prefab | null = null;
+    private _vslotPrefab: Prefab | null = null;
 
     private _terrainLayer: Node | null = null;
     private _boxLayer: Node | null = null;
@@ -64,6 +68,8 @@ export class GameManager extends Component {
     private _ticketSeq: number = 0;
     private _blockedTime: number = 0;
     private _allBlocksSpeedBoosted: boolean = false;
+    /** 已点击批次中尚未被轨道接收的小球数，包含尚在 Slot 前置动画中的预占数量。 */
+    private _untrackedBallCount: number = 0;
     private _startTime: number = 0;
 
     /** 入口捕获区中心（取自 EntranceGate） */
@@ -91,6 +97,11 @@ export class GameManager extends Component {
      * 因为地形需要异步加载）。
      */
     public async startLevel(): Promise<boolean> {
+        const gridAsset = await ResManager.load(ResPaths.levelGrids, JsonAsset);
+        if (!gridAsset || !installLevelConfig(gridAsset.json)) {
+            console.error('[GameManager] LevelGrids.json 加载或解析失败，无法开始。');
+            return false;
+        }
         const def = LevelManager.getCurrentDef();
         if (!def) {
             console.error('[GameManager] 当前关卡配置不存在，无法开始。');
@@ -117,23 +128,38 @@ export class GameManager extends Component {
         this._collectBoxPrefab = await ResManager.load(
             ResPaths.prefab(PrefabNames.CollectBox), Prefab
         );
-        if (!this._collectBoxPrefab) {
-            const errors = ['CollectBox.prefab 加载失败，关卡已阻止启动。'];
+        this._colorBlockPrefab = await ResManager.load(
+            ResPaths.prefab(PrefabNames.ColorBlock), Prefab
+        );
+        this._vslotPrefab = await ResManager.load(
+            ResPaths.prefab(PrefabNames.VSlot), Prefab
+        );
+        const grid = def.grid;
+        if (!this._collectBoxPrefab || !this._colorBlockPrefab || !this._vslotPrefab || !grid) {
+            const errors = [
+                `必需 Prefab 或网格 ${def.gridId} 加载失败，关卡已阻止启动。`,
+            ];
+            EventBus.emit(GameEvent.LevelValidateFailed, { levelId: def.levelId, errors });
+            return false;
+        }
+        const gridErrors = LevelValidator.validateGrid(def, grid);
+        if (gridErrors.length > 0) {
+            EventBus.emit(GameEvent.LevelValidateFailed, { levelId: def.levelId, errors: gridErrors });
+            console.error(`[GameManager] JSON 网格 ${def.gridId} 校验失败，已阻止生成。`);
+            return false;
+        }
+
+        // 1. 先实例化共用 VSlot，再以其中 Startgridpos 为底部中心生成配置网格。
+        const terrainInfo = this.buildConfiguredTerrain(def, grid);
+        if (!terrainInfo) {
+            const errors = ['VSlot / Startgridpos / ColorBlock 网格生成失败，关卡已阻止启动。'];
             EventBus.emit(GameEvent.LevelValidateFailed, { levelId: def.levelId, errors });
             return false;
         }
 
-        // 1. 取得地形（优先加载 Prefab，其次使用场景中已摆好的地形）
-        const terrain = await this.resolveTerrain(def);
-        if (!terrain) return false;
-        this._terrain = terrain;
-
-        this._blocks = terrain.getBlocks();
-        this._vslots = terrain.getVSlots();
-
-        // 2. 依据地形实际格子数构建计划，并严格校验
+        // 2. 依据配置网格实际生成的格子数构建计划，并严格校验
         const plan = buildLevelPlan(def, this._blocks.length);
-        const result = LevelValidator.validate(def, plan, terrain.collectInfo());
+        const result = LevelValidator.validate(def, grid, plan, terrainInfo);
         LevelValidator.logResult(def.levelId, result);
 
         if (!result.ok) {
@@ -154,6 +180,7 @@ export class GameManager extends Component {
         this._track.node.setSiblingIndex(trackIndex);
 
         this.setupBlocks(plan);
+        this._untrackedBallCount = 0;
         this._allBlocksSpeedBoosted = false;
         if (!this.createBoxes(plan.boxColumns)) {
             const errors = ['CollectBox.prefab 结构或脚本配置错误，关卡已阻止启动。'];
@@ -173,7 +200,6 @@ export class GameManager extends Component {
         const d = resolveDifficulty(def);
         CFG.trackSpeed = d.trackSpeed;
         CFG.loseGraceTime = d.loseGraceTime;
-        CFG.boxMaxVisibleRows = d.boxVisibleRows;
     }
 
     private setupPhysics(): void {
@@ -214,49 +240,129 @@ export class GameManager extends Component {
         this._ballLayer.setPosition(0, 0, 0);
     }
 
-    /**
-     * 取得地形：
-     * 1) 按 LevelConfig 的 terrain 名从 resources 加载并实例化
-     * 2) 加载失败时，退回使用场景里已经摆好的 TerrainRoot（兼容手工搭的调试场景）
-     */
-    private async resolveTerrain(def: LevelDef): Promise<TerrainRoot | null> {
-        const path = LevelManager.terrainPath(def);
-        if (path) {
-            const node = await ResManager.instantiatePrefab(path, this._terrainLayer ?? this.node);
-            if (node) {
-                node.setPosition(0, 0, 0);
-                const root = node.getComponent(TerrainRoot) ?? node.getComponentInChildren(TerrainRoot);
-                if (root) return root;
-                console.error(
-                    `[GameManager] 地形 ${def.terrain} 的根节点上没有 TerrainRoot 组件。`
-                );
-                node.destroy();
-            } else {
-                console.warn(
-                    `[GameManager] 未能加载地形预制体 resources/${path}，` +
-                    '尝试使用场景中已存在的地形。'
-                );
-            }
+    /** 由 JSON 网格生成本关唯一 VSlot 与 ColorBlock 网格。 */
+    private buildConfiguredTerrain(def: LevelDef, grid: LevelGrid): TerrainInfo | null {
+        if (!this._terrainLayer || !this._vslotPrefab || !this._colorBlockPrefab) return null;
+
+        const vslotNode = instantiate(this._vslotPrefab);
+        vslotNode.setParent(this._terrainLayer);
+        vslotNode.setPosition(0, 0, 0);
+        const vslot = vslotNode.getComponent(VSlot);
+        const gridStart = vslot?.getGridStart() ?? null;
+        if (!vslot || !gridStart) {
+            console.error('[GameManager] VSlot.prefab 必须挂 VSlot，并包含 Startgridpos 子节点。');
+            vslotNode.destroy();
+            return null;
         }
 
-        const scene = director.getScene();
-        const inScene = scene ? scene.getComponentInChildren(TerrainRoot) : null;
-        if (inScene) return inScene;
+        const blocks: Array<{ node: Node; row: number; col: number; block: ColorBlock }> = [];
+        for (let row = 0; row < grid.length; row++) {
+            for (let col = 0; col < grid[row].length; col++) {
+                if (grid[row][col] !== 1) continue;
+                const node = instantiate(this._colorBlockPrefab);
+                const block = node.getComponent(ColorBlock);
+                const ui = node.getComponent(UITransform);
+                if (!block || !ui) {
+                    console.error('[GameManager] ColorBlock.prefab 必须在根节点挂 ColorBlock 和 UITransform。');
+                    node.destroy();
+                    vslotNode.destroy();
+                    for (const item of blocks) item.node.destroy();
+                    return null;
+                }
+                blocks.push({ node, row, col, block });
+            }
+        }
+        if (blocks.length === 0) {
+            console.error('[GameManager] 当前关卡网格没有任何 ColorBlock。');
+            vslotNode.destroy();
+            return null;
+        }
 
-        console.error(
-            `[GameManager] 找不到地形：既无法加载 ${def.terrain}，` +
-            '场景中也没有挂 TerrainRoot 的节点。'
-        );
-        return null;
+        const sampleUI = blocks[0].node.getComponent(UITransform)!;
+        const blockWidth = sampleUI.contentSize.width || CFG.blockWidth;
+        const blockHeight = sampleUI.contentSize.height || CFG.blockHeight;
+        const rows = grid.length;
+        const columns = grid[0].length;
+        const stepX = blockWidth + CFG.colorBlockGridGap;
+        const stepY = blockHeight + CFG.colorBlockGridGap;
+        const gridWidth = blockWidth + Math.max(0, columns - 1) * stepX;
+        const gridHeight = blockHeight + Math.max(0, rows - 1) * stepY;
+
+        const gridRoot = new Node('ColorBlockGrid');
+        const gridUI = gridRoot.addComponent(UITransform);
+        gridUI.setAnchorPoint(0.5, 0);
+        gridUI.setContentSize(gridWidth, gridHeight);
+        gridRoot.setParent(this._terrainLayer);
+        const terrainUI = this._terrainLayer.getComponent(UITransform);
+        const startLocal = terrainUI
+            ? terrainUI.convertToNodeSpaceAR(gridStart.worldPosition)
+            : gridStart.position.clone();
+        gridRoot.setPosition(startLocal);
+
+        for (const item of blocks) {
+            item.node.setParent(gridRoot);
+            item.node.setPosition(
+                -gridWidth / 2 + blockWidth / 2 + item.col * stepX,
+                blockHeight / 2 + (rows - 1 - item.row) * stepY,
+                0,
+            );
+        }
+
+        this._blocks = blocks.map((item) => item.block);
+        this._blockGridCoords = blocks.map((item) => ({ row: item.row, col: item.col }));
+        this._blockIndexByCell.clear();
+        for (let i = 0; i < this._blockGridCoords.length; i++) {
+            const p = this._blockGridCoords[i];
+            this._blockIndexByCell.set(`${p.row}:${p.col}`, i);
+        }
+        this._vslots = [vslot];
+        return {
+            terrainName: `Level_${def.levelId}_Grid`,
+            blockCount: this._blocks.length,
+            vslotCount: 1,
+            entranceGateCount: vslot.getEntranceGate() ? 1 : 0,
+        };
     }
 
     /** 给地形里的每个格子分配颜色 */
     private setupBlocks(plan: LevelPlan): void {
+        const bottomRow = this._blockGridCoords.reduce((max, p) => Math.max(max, p.row), -1);
         for (let i = 0; i < this._blocks.length; i++) {
             const block = this._blocks[i];
             const color = plan.blockColors[i];
-            block.setup(color, i, (c, spawnPos) => this.onBallReleased(c, spawnPos));
+            block.setup(
+                color,
+                i,
+                (c, spawnPos) => this.onBallReleased(c, spawnPos),
+                (index) => this.onColorBlockActivated(index),
+                () => this.tryReserveColorBlockBatch(),
+            );
+            block.setClickEnabled(this._blockGridCoords[i]?.row === bottomRow);
         }
+    }
+
+    /** 点击一个已解锁格后，解锁其四方向相邻 ColorBlock。 */
+    private onColorBlockActivated(blockIndex: number): void {
+        const p = this._blockGridCoords[blockIndex];
+        if (!p) return;
+        const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+        for (const [dr, dc] of directions) {
+            const neighborIndex = this._blockIndexByCell.get(`${p.row + dr}:${p.col + dc}`);
+            if (neighborIndex === undefined) continue;
+            const neighbor = this._blocks[neighborIndex];
+            if (neighbor?.isValid && !neighbor.hasBeenClicked()) neighbor.setClickEnabled(true);
+        }
+    }
+
+    /** 点击 ColorBlock 时整批预占 9 个名额，防止快速连点突破场地上限。 */
+    private tryReserveColorBlockBatch(): boolean {
+        const max = CFG.ballsPerBlock * CFG.maxUntrackedBallBatches;
+        if (this._untrackedBallCount + CFG.ballsPerBlock > max) {
+            EventBus.emit(GameEvent.Subtitle, { text: '小球太多了' });
+            return false;
+        }
+        this._untrackedBallCount += CFG.ballsPerBlock;
+        return true;
     }
 
     /**
@@ -324,17 +430,15 @@ export class GameManager extends Component {
         const list = this._columns[col];
         if (!list) return;
 
-        const maxVisible = Math.max(1, CFG.boxMaxVisibleRows);
         const x = this.columnX(col);
 
         for (let row = 0; row < list.length; row++) {
             const box = list[row];
             if (!box || !box.isValid) continue;
 
-            const visible = row < maxVisible;
             box.setCollectable(row === 0);
-            if (box.node.active !== visible) box.node.active = visible;
-            box.moveTo(new Vec3(x, this.rowY(row), 0), animated && visible);
+            if (!box.node.active) box.node.active = true;
+            box.moveTo(new Vec3(x, this.rowY(row), 0), animated);
         }
     }
 
@@ -365,13 +469,19 @@ export class GameManager extends Component {
     // ==================== 事件 ====================
 
     private onBallReleased(color: BallColor, spawnWorldPos: Vec3): boolean {
-        if (this._state !== GameState.Playing || this._paused || !this._ballLayer) return false;
+        if (this._state !== GameState.Playing || this._paused || !this._ballLayer) {
+            this.releaseUntrackedReservation();
+            return false;
+        }
 
         const spawnLocal = this._ballLayerUI
             ? this._ballLayerUI.convertToNodeSpaceAR(spawnWorldPos)
             : spawnWorldPos;
         const ball = this._ballPool.get(color, spawnLocal, this._ballLayer);
-        if (!ball) return false;
+        if (!ball) {
+            this.releaseUntrackedReservation();
+            return false;
+        }
         this._balls.push(ball);
         return true;
     }
@@ -430,7 +540,14 @@ export class GameManager extends Component {
         if (waiting.length === 0) return;
 
         waiting.sort((a, b) => a.waitTicket - b.waitTicket);
-        if (this._track.tryAccept(waiting[0])) this.emitProgress();
+        if (this._track.tryAccept(waiting[0])) {
+            this.releaseUntrackedReservation();
+            this.emitProgress();
+        }
+    }
+
+    private releaseUntrackedReservation(): void {
+        this._untrackedBallCount = Math.max(0, this._untrackedBallCount - 1);
     }
 
     private inEntryZone(p: Vec3): boolean {

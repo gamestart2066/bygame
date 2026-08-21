@@ -19,8 +19,8 @@ const { ccclass } = _decorator;
  * - 24 个离散槽位按**路径弧长**均匀分布（不是把 0~360° 均分），
  *   因此上下直线段的球间距与圆角处一致，不会在两端挤成一团。
  * - 轨道循环运动 = 所有槽位的弧长坐标随时间整体推进。
- * - 位置不写死：**上边直线的中点对齐场景中的 EntranceGate**，
- *   轨道中心 = 入口 - (0, trackCornerRadius)。
+ * - 位置不写死：上边直线的中点位于场景 EntranceGate 下方，
+ *   两者间隙由 `CFG.trackEntryGap` 控制。
  * - 轨道上的球不使用物理，每帧由本系统按弧长直接定位。
  *
  * 路径参数化（顺时针，s = 从起点起算的弧长）：
@@ -82,11 +82,11 @@ export class TrackSystem extends Component {
         return this.straightLen / 2;
     }
 
-    /** 以入口位置反推轨道中心（入口 = 上边直线的中点） */
+    /** 以 EntranceGate 位置反推轨道中心，并在 Gate 下方保留可调空隙。 */
     public setEntry(entryLocalPos: Vec3): void {
         this._center.set(
             entryLocalPos.x,
-            entryLocalPos.y + CFG.trackEntryOffsetY - CFG.trackCornerRadius,
+            entryLocalPos.y - CFG.trackEntryGap - CFG.trackCornerRadius,
             0
         );
     }
@@ -155,6 +155,13 @@ export class TrackSystem extends Component {
         return this.getPointAtLength(this.getSlotArc(i));
     }
 
+    /** 预估若干秒后槽位的位置，供入轨 Tween 落到持续运动的槽位上。 */
+    private getFutureSlotPos(i: number, seconds: number): Vec3 {
+        const futureArc = this.getSlotArc(i)
+            + CFG.trackSpeed * this._speedMultiplier * Math.max(0, seconds);
+        return this.getPointAtLength(futureArc);
+    }
+
     /** 入口坐标 */
     public getEntryPos(): Vec3 {
         return this.getPointAtLength(this.entryArc);
@@ -208,7 +215,11 @@ export class TrackSystem extends Component {
 
         // 立即占位，防止同帧内多个球抢占同一槽
         this._slots[slot] = ball;
-        ball.enterTrack(slot, this.getSlotPos(slot), () => { /* 到位后由 update 接管 */ });
+        ball.enterTrack(
+            slot,
+            this.getFutureSlotPos(slot, CFG.enterDuration),
+            () => { /* 到位后由 update 接管 */ }
+        );
         return true;
     }
 

@@ -23,6 +23,8 @@ export enum GameEvent {
     BoxFinished = 'box-finished',
     /** 轨道即将满，payload: { used, capacity } */
     TrackNearFull = 'track-near-full',
+    /** 通用飘字字幕，payload: { text: string } */
+    Subtitle = 'subtitle',
 
     // ---- 结果 ----
     /** payload: GameResultData */

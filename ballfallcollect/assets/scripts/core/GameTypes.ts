@@ -79,6 +79,13 @@ export const CFG = {
      */
     blockWidth: 190,
     blockHeight: 190,
+    /** ColorBlock 配置网格中相邻节点的边缘间距 */
+    colorBlockGridGap: 10,
+    /** ColorBlock 解锁时根节点脉冲倍率与总时长 */
+    colorBlockUnlockPulseScale: 1.08,
+    colorBlockUnlockPulseDuration: 0.28,
+    /** Lid 解锁缩小至消失的时长 */
+    colorBlockLidHideDuration: 0.22,
     /** 点击后逐球释放的间隔（秒），避免同帧重叠穿透 */
     releaseInterval: 0.028,
     /** Slot 展示球释放动画：在各自原位先上抬，再下落并放大 */
@@ -89,6 +96,13 @@ export const CFG = {
     /** 完整前置 Tween 时长；结束后才允许生成真实 Ball */
     slotReleaseDuration: 0.2,
     ballsPerBlock: 9,
+    /** 轨道外最多允许同时滞留多少个 ColorBlock 批次的小球（6×9=54） */
+    maxUntrackedBallBatches: 6,
+
+    /** ---- 通用字幕飘字 ---- */
+    subtitleRiseDistance: 60,
+    subtitleDuration: 0.65,
+    subtitleHoldDuration: 0.15,
 
     /* ---- V 型槽 / 汇流斜板参数已移除 ----
      * 这些属于场景布局，现由用户在编辑器中通过 VSlot.prefab 摆放，
@@ -109,8 +123,8 @@ export const CFG = {
     trackStraightHalf: 270,
     /** 两端圆角半径；**上下直线间距 = 2 × 此值**，越小越扁 */
     trackCornerRadius: 40,
-    /** 轨道入口相对 EntranceGate 的微调偏移（0 = 完全对齐） */
-    trackEntryOffsetY: 0,
+    /** EntranceGate 与轨道上沿之间的垂直空隙；正值表示轨道位于 Gate 下方 */
+    trackEntryGap: 12,
     /** 找不到 EntranceGate 时的兜底入口位置（仅防止崩溃） */
     fallbackEntryX: 0,
     fallbackEntryY: 70,
@@ -127,8 +141,9 @@ export const CFG = {
     entryZoneHeight: 90,
     /** 空槽与入口的**弧长**容差（像素）内才允许吸附 */
     entryArcTolerance: 34,
-    /** 吸附进入轨道的动画时长（秒） */
-    enterDuration: 0.18,
+    /** 跳入轨道的总动画时长与上抬高度 */
+    enterDuration: 0.3,
+    enterJumpHeight: 42,
 
     /** ---- 收纳箱（固定列 + 列内向上补位）----
      * 布局**完全独立**于顶部 ColorBlock：列的 X 由本系统自己定义，
@@ -144,8 +159,6 @@ export const CFG = {
     boxColumnSpacing: 125,
     /** 相邻行中心点的 Y 间距，应略大于 boxHeight */
     boxRowSpacing: 80,
-    /** 每列最多显示几行，超出的箱子隐藏（避免堆到屏幕外） */
-    boxMaxVisibleRows: 3,
     /** 列内向上补位的平移动画时长 */
     boxMoveDuration: 0.25,
     /** 收纳判定：球与箱的**水平**对齐阈值（球经过箱子上方即收纳）

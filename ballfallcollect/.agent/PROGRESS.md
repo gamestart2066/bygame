@@ -3,7 +3,7 @@
 > 只描述**当前状态**：现在处于哪个阶段、已经具备什么能力、卡在哪里。
 > 不记录逐次修改过程；待办见 `TODO.md`。
 
-**当前阶段**：🟢 **功能细节完善 + 动画表现 + 操作手感优化**
+**当前阶段**：🟢 **配置驱动关卡扩展 + 功能细节与手感优化**
 
 当前最新版本（含 UI 实体化改造）已在 Cocos Creator 中实际运行，核心流程基本正常，
 可作为后续开发的可运行 baseline。
@@ -24,16 +24,19 @@
 格子 / 每格 9 球 / 点击释放 / V 槽汇聚 / 刚体重力 / 跑道形轨道 /
 24 离散槽位 / 自动入轨 / 彩色收纳箱 / 同色入箱 / 满 3 消失 / 24 容量限制 / 胜利 / 失败
 
-- **场景驱动**：格子与 V 槽由用户在编辑器摆放，代码只扫描，不生成布局
+- **配置驱动关卡**：`play/config/LevelGrids.json` 是网格、颜色/箱序和难度的唯一事实源；当前 20 关优先使用对称矩形网格并按难度递增
+- **网格解锁**：最底行初始开放，点击后按四方向邻接逐步解锁；锁定态由 ColorBlock/Lid 显示
+- **场地球上限**：ColorBlock 点击时整批预占 9 个轨道外名额，上限 54；轨道接收后逐球释放名额，超限通过 HUD 字幕提示
 - **混合驱动**：物理（下落）→ 脚本定位（在轨）→ Tween（入箱）
 - **小球资源链路**：Ball Prefab + 关卡前预热的 BallPool；ColorBlock 实体 Slot 两阶段出球，Pool 复用执行深度 reset
 - **收纳箱队列**：CollectBox Prefab 驱动、固定 4 列；每箱 3 个可编辑 Slot，每槽以 BallVisual 作为飞入目标和最终显示；仅已完成补位的第一行可收
-- **轨道节奏**：关卡基础速度已提高；本关全部 ColorBlock 至少点击一次后切换为基础速度 2 倍
+- **收纳箱展示**：四列中的全部箱子始终显示，不再用关卡参数隐藏后排；可收权限仍只有每列第一行
+- **轨道衔接与节奏**：EntranceGate 与轨道上沿保留可调间隙，小球两段 Tween 跳入移动槽位；本关全部 ColorBlock 点击后切换为基础速度 2 倍
 
 ### 框架
 
 - `core/`：`CFG` 全局参数、`EventBus`、`ResManager`（`play` Bundle）、`ResPaths`（路径唯一定义处）
-- `config/`：3 关关卡表、关卡进度、进入游戏前 8 项 `LevelValidator` 校验
+- `config/`：20 关 JSON 解析与运行时计划、关卡进度、进入游戏前严格 `LevelValidator` 校验
 - `scene/`：`SceneRouter` + Loading / Hall / Game 三场景入口，三场景 Canvas 均已挂对应 Entry
 - `ui/`：**实体节点驱动**。Loading / Hall / GameHUD 为场景固定节点；
   Pause / Result 为 `play/ui/` 下的 Prefab，由 `UIManager` 管理并置于 `PopupLayer`
@@ -41,7 +44,6 @@
 
 ### 资源
 
-- `play/map/LevelTerrain_01.prefab`：3 个 `ColorBlock` + 1 个 `VSlot`（内含 `EntranceGate`），根节点挂 `TerrainRoot`
 - `play/prefab/`：`Ball.prefab` · `ColorBlock.prefab` · `VSlot.prefab` · `CollectBox.prefab`
 - `play/ui/`：`PauseUI.prefab` · `ResultUI.prefab`
 
@@ -58,8 +60,8 @@ Cocos Creator 中实际运行，核心流程基本正常。场景挂载、Bundle
 - 完善功能细节与异常边界
 - 增强动画表现与操作反馈
 - 持续调优地形布局、物理汇流和整体手感
-- 对 BallPool 预热、ColorBlock 出球、CollectBox 三槽收纳和轨道两段速度做 Creator 集成实跑验证
-- 核心链路验证稳定后扩展关卡
+- 在 Creator 中抽查前、中、后段关卡的网格、颜色/箱序与难度曲线，并逐步完成 20 关实跑
+- 继续完善关卡规则、难度曲线与操作手感
 
 ---
 

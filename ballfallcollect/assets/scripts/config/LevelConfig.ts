@@ -4,9 +4,9 @@ import { BallColor, CFG, COLOR_TABLE } from '../core/GameTypes';
  * 正式关卡配置。
  *
  * ============ 核心分离原则 ============
- * **Terrain Prefab** = 物理/空间布局（格子数量与坐标、VSlot、EntranceGate、额外挡板）
- * **LevelDef**       = 这一关怎么玩（颜色、箱子列排列、难度、随机方式）
- * 两者互不侵入：代码不决定地形坐标，地形不决定玩法规则。
+ * **VSlot Prefab** = 共用的物理汇流结构、EntranceGate 与 Startgridpos
+ * **LevelGrids.json** = 完整关卡事实源：网格、颜色、箱列顺序、难度与随机方式
+ * **LevelDef**      = JSON 解析后的运行时只读结构
  * ======================================
  */
 
@@ -37,15 +37,15 @@ export interface DifficultyParams {
     trackSpeed?: number;
     /** 满槽宽限（秒）：越小越容易判负 */
     loseGraceTime?: number;
-    /** 每列可见行数：越小玩家能看到的未来信息越少 */
-    boxVisibleRows?: number;
 }
 
 export interface LevelDef {
     levelId: number;
     name: string;
-    /** 地形预制体文件名，实际路径由 ResPaths.terrain() 拼装 */
-    terrain: string;
+    /** JSON 中稳定的关卡网格标识，便于日志和未来工具定位。 */
+    gridId: string;
+    /** ColorBlock 网格，按从上到下的行顺序保存。 */
+    grid: LevelGrid;
     /**
      * 使用几种颜色。
      * - `Auto` 模式：决定给格子分配几种颜色
@@ -79,77 +79,32 @@ export const PALETTE: ReadonlyArray<BallColor> = [
     BallColor.Orange,
 ];
 
-/**
- * 关卡表。
- *
- * 注意：`terrain` 指向的预制体必须存在于 `assets/play/map/`（play Bundle，
- * 实际路径由 `ResPaths.terrain()` 拼装为 `map/<name>`），
- * 且其中的格子数量要与本关颜色/箱子设计匹配（由 LevelValidator 校验）。
- */
-export const LEVELS: ReadonlyArray<LevelDef> = [
-    {
-        levelId: 1,
-        name: '入门 · 双色',
-        terrain: 'LevelTerrain_01',
-        colorKinds: 2,
-        boxFill: BoxFillMode.Auto,
-        difficulty: {
-            trackSpeed: 180,
-            loseGraceTime: 2.0,
-            boxVisibleRows: 3,
-        },
-        seed: 1001,
-        shuffle: ShuffleMode.Boxes,
-        specialRules: [],
-    },
-    {
-        levelId: 2,
-        name: '三色 · 自动配箱',
-        // 地形暂时统一使用第一关（play/map 下目前只有 LevelTerrain_01）
-        terrain: 'LevelTerrain_01',
-        colorKinds: 3,
-        boxFill: BoxFillMode.Auto,
-        difficulty: {
-            trackSpeed: 200,
-            loseGraceTime: 1.5,
-            boxVisibleRows: 3,
-        },
-        seed: 1002,
-        shuffle: ShuffleMode.Both,
-        specialRules: [],
-    },
-    {
-        /**
-         * 手工设计示例：4 列各自的颜色顺序被精确指定。
-         *
-         * 数量必须自洽（否则 LevelValidator 会拒绝进入游戏）：
-         *   每色箱数 × 3 = 该色球数 = 该色格子数 × 9
-         *   ⇒ **每种颜色的箱数必须是 3 的倍数**
-         * 本关：RED 3 箱、BLUE 3 箱、YELLOW 3 箱 = 9 箱
-         *   ⇒ 每色 9 球 ⇒ 每色 1 格 ⇒ 地形需恰好 3 个 ColorBlock
-         * LevelTerrain_01 正好是 3 个格子，因此可直接复用。
-         */
-        levelId: 3,
-        name: '手工编排 · 三色',
-        terrain: 'LevelTerrain_01',
-        colorKinds: 3,
-        boxFill: BoxFillMode.Manual,
-        boxColumns: [
-            [BallColor.Red, BallColor.Blue, BallColor.Yellow], // A 列（队首 RED）
-            [BallColor.Blue, BallColor.Yellow],                // B 列（队首 BLUE）
-            [BallColor.Yellow, BallColor.Red],                 // C 列（队首 YELLOW）
-            [BallColor.Red, BallColor.Blue],                   // D 列（队首 RED）
-        ],
-        difficulty: {
-            trackSpeed: 220,
-            loseGraceTime: 1.5,
-            boxVisibleRows: 2,
-        },
-        seed: 1003,
-        shuffle: ShuffleMode.None,
-        specialRules: [],
-    },
-];
+export type GridCell = 0 | 1;
+export type LevelGrid = ReadonlyArray<ReadonlyArray<GridCell>>;
+
+let _levels: ReadonlyArray<LevelDef> = [];
+
+/** 安装 JsonAsset 中的完整关卡表；成功后 JSON 成为唯一运行时事实源。 */
+export function installLevelConfig(source: unknown): boolean {
+    if (!source || typeof source !== 'object') return false;
+    const raw = (source as { levels?: unknown }).levels;
+    if (!Array.isArray(raw) || raw.length === 0) return false;
+
+    const parsed: LevelDef[] = [];
+    for (const item of raw) {
+        if (!item || typeof item !== 'object') return false;
+        const def = item as LevelDef;
+        if (!Number.isInteger(def.levelId) || !Array.isArray(def.grid)) return false;
+        parsed.push(def);
+    }
+    parsed.sort((a, b) => a.levelId - b.levelId);
+    _levels = parsed;
+    return true;
+}
+
+export function getAllLevelDefs(): ReadonlyArray<LevelDef> {
+    return _levels;
+}
 
 // ==================== 运行时关卡计划 ====================
 
@@ -191,11 +146,11 @@ function shuffle<T>(arr: T[], rnd: () => number): T[] {
 }
 
 export function getLevelDef(levelId: number): LevelDef | null {
-    return LEVELS.find((l) => l.levelId === levelId) ?? null;
+    return _levels.find((l) => l.levelId === levelId) ?? null;
 }
 
 export function getLevelCount(): number {
-    return LEVELS.length;
+    return _levels.length;
 }
 
 /** 难度参数取值（配置优先，否则用 CFG 默认） */
@@ -204,7 +159,6 @@ export function resolveDifficulty(def: LevelDef): Required<DifficultyParams> {
     return {
         trackSpeed: d.trackSpeed ?? CFG.trackSpeed,
         loseGraceTime: d.loseGraceTime ?? CFG.loseGraceTime,
-        boxVisibleRows: d.boxVisibleRows ?? CFG.boxMaxVisibleRows,
     };
 }
 
@@ -212,7 +166,7 @@ export function resolveDifficulty(def: LevelDef): Required<DifficultyParams> {
  * 构建运行时关卡计划。
  *
  * @param def 关卡配置
- * @param blockCount 地形中**实际存在**的 ColorBlock 数量（由 TerrainRoot 扫描得到）
+ * @param blockCount 根据 JSON 网格实例化出的 ColorBlock 数量
  */
 export function buildLevelPlan(def: LevelDef, blockCount: number): LevelPlan {
     const rnd = makeRandom(def.seed);
