@@ -63,7 +63,6 @@ export const CFG = {
     ballVisualScale: 2.0,
     ballDensity: 1,
     ballFriction: 0.35,
-    ballRestitution: 0.15,
     /** 真实 Ball 出现并启用物理瞬间的初速度（px/s） */
     ballInitialVelocityX: 0,
     ballInitialVelocityY: -10,

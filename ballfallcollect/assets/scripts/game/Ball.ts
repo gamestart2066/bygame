@@ -22,6 +22,8 @@ export class Ball extends Component {
     private _collider: CircleCollider2D | null = null;
     /** Ball.prefab 上序列化的原始碰撞半径；首次缓存后不再被运行时值覆盖。 */
     private _baseColliderRadius: number = -1;
+    /** Ball.prefab 上序列化的原始弹性；对象池复用时恢复，Prefab 是唯一事实源。 */
+    private _baseColliderRestitution: number = -1;
     private _view: Node | null = null;
     private _recycled: boolean = true;
     private _lifecycleToken: number = 0;
@@ -82,6 +84,9 @@ export class Ball extends Component {
         if (this._collider && this._baseColliderRadius < 0) {
             this._baseColliderRadius = this._collider.radius;
         }
+        if (this._collider && this._baseColliderRestitution < 0) {
+            this._baseColliderRestitution = this._collider.restitution;
+        }
         this._view = this.node.getChildByName('Sprite');
         this.ballSprite = this.ballSprite
             ?? this._view?.getComponent(Sprite)
@@ -107,7 +112,7 @@ export class Ball extends Component {
         col.radius = this._baseColliderRadius * CFG.ballVisualScale;
         col.density = CFG.ballDensity;
         col.friction = CFG.ballFriction;
-        col.restitution = CFG.ballRestitution;
+        col.restitution = this._baseColliderRestitution;
         col.enabled = true;
         rb.enabled = true;
         col.apply();

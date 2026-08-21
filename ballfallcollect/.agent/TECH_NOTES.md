@@ -171,6 +171,7 @@ SystemStatic(墙) → Track → BoxLayer → BallLayer(下落/等待) → TrackB
 | 逐球释放（间隔见 `CFG`） | `releaseInterval` 是相邻 Slot/真实球释放间隔的唯一参数；`>0` 用 schedule，`<=0` 必须同帧直接启动全部 Tween（不能 `scheduleOnce(0)`）；Tween 可并行，每颗只在自己的动画完成后生成真实球 | 动画时长只增加统一前置延迟，不改变球与球之间的间隔 |
 | ColorBlock 出球表现 | 实体 Slot Sprite 在各自原位先上抬再下落：左列向左外扩、右列向右外扩、中列保持竖直；完整 Tween 中持续放大到 `CFG.ballVisualScale`，结束后才隐藏并在各自动画终点从 BallPool 取真实 Ball | 展示球与物理球分离，保持坐标对应，并分散较大 Collider 的出生位置 |
 | 真实 Ball 初速度 | 启用物理的同一帧应用 `CFG.ballInitialVelocityX/Y`（当前轻微向下） | 接续 Slot 展示球的下落趋势；Pool 回收时归零，不跨生命周期残留 |
+| Ball 碰撞弹性 | 只读取并恢复 `Ball.prefab` 根节点 `CircleCollider2D.restitution` | Prefab 是唯一事实源，禁止在 CFG 重复维护或运行时写死另一数值 |
 | BallPool 预热 | `GameManager.startLevel()` 在 Playing 前按 `CFG.ballPoolPrewarmCount` 实例化并 reset（当前 18） | 首次点击不集中 instantiate；不足时仍可安全扩容 |
 | 轨道两段速度 | `CFG.trackSpeed` 是关卡基础速度；全部 ColorBlock 至少点击一次后使用 `trackAllBlocksClickedMultiplier`（当前 2） | 运行时倍率只属于本关，不回写 CFG、不污染 Restart/下一关 |
 | 轨道外球上限 | 点击时整批预占 `ballsPerBlock`，轨道 `tryAccept` 成功后逐球释放；上限=`ballsPerBlock × maxUntrackedBallBatches`（当前 54） | 不能只数已 instantiate 的球，否则快速连点会在 Slot Tween 期间突破上限 |
