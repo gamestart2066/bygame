@@ -3,6 +3,7 @@ import {
 } from 'cc';
 import { BallColor, CFG, getColor } from '../core/GameTypes';
 import { BallVisuals } from './BallVisuals';
+import { ColorBlockType } from '../config/LevelConfig';
 
 const { ccclass, property } = _decorator;
 
@@ -22,6 +23,7 @@ export class ColorBlock extends Component {
     public colorId: BallColor = BallColor.Red;
 
     public blockIndex: number = 0;
+    public blockType: ColorBlockType = ColorBlockType.Normal;
 
     /** 剩余未释放的球数 */
     public remaining: number = CFG.ballsPerBlock;
@@ -32,9 +34,15 @@ export class ColorBlock extends Component {
     /** 是否已由网格解锁；锁定时触摸不生效并显示 Lid。 */
     private _clickEnabled: boolean = false;
     private _background: Node | null = null;
+    private _slotsRoot: Node | null = null;
     private _bgSprite: Sprite | null = null;
+    /** Prefab 中 Background 的原始颜色，Unknown 揭示前保持该色而不赋玩法颜色。 */
+    private _bgBaseColor: Color = new Color(255, 255, 255, 255);
     private _lid: Node | null = null;
     private _lidSprite: Sprite | null = null;
+    private _unknown: Node | null = null;
+    /** Unknown 解锁前不允许实际颜色节点泄露。 */
+    private _typeRevealed: boolean = true;
     private _baseScale: Vec3 = new Vec3(1, 1, 1);
     private _lidBaseScale: Vec3 = new Vec3(1, 1, 1);
     private _slotNodes: Node[] = [];
@@ -49,6 +57,7 @@ export class ColorBlock extends Component {
     /** 展示球动画结束后的回调：(color, 动画终点世界坐标) */
     private _onRelease: ((color: BallColor, spawnWorldPos: Vec3) => boolean) | null = null;
     private _onActivated: ((blockIndex: number) => void) | null = null;
+    private _onDepleted: ((blockIndex: number) => void) | null = null;
     private _canActivate: (() => boolean) | null = null;
 
     /**
@@ -58,12 +67,16 @@ export class ColorBlock extends Component {
     public setup(
         color: BallColor,
         index: number,
+        blockType: ColorBlockType,
         onRelease: (color: BallColor, spawnWorldPos: Vec3) => boolean,
         onActivated: (blockIndex: number) => void,
         canActivate: () => boolean,
+        onDepleted?: (blockIndex: number) => void,
     ): void {
         this.colorId = color;
         this.blockIndex = index;
+        this.blockType = blockType;
+        this._typeRevealed = blockType !== ColorBlockType.Unknown;
         this.remaining = CFG.ballsPerBlock;
         this._nextSlotIndex = this.remaining - 1;
         this._pendingReleases = 0;
@@ -72,11 +85,13 @@ export class ColorBlock extends Component {
         this._onRelease = onRelease;
         this._onActivated = onActivated;
         this._canActivate = canActivate;
+        this._onDepleted = onDepleted ?? null;
         this._initialized = true;
 
         this._background = this.node.getChildByPath('Background');
         if (this._background) {
             this._bgSprite = this._background.getComponent(Sprite) ?? this._background.addComponent(Sprite);
+            this._bgBaseColor = this._bgSprite.color.clone();
         } else {
             console.warn('[ColorBlock] 未找到 Background 子节点，背景将不会染色。');
         }
@@ -89,8 +104,13 @@ export class ColorBlock extends Component {
             console.warn('[ColorBlock] 未找到 Lid(Sprite)，锁定遮罩将无法显示。');
         }
 
-        const slots = this.node.getChildByPath('Slots');
-        this._slotNodes = slots ? slots.children.slice() : [];
+        this._unknown = this.node.getChildByName('Unknown');
+        if (this.blockType === ColorBlockType.Unknown && !this._unknown) {
+            console.error('[ColorBlock] unknown 类型要求 Prefab 根节点包含 Unknown 子节点。');
+        }
+
+        this._slotsRoot = this.node.getChildByPath('Slots');
+        this._slotNodes = this._slotsRoot ? this._slotsRoot.children.slice() : [];
         this._slotSprites = this._slotNodes
             .map((n) => n.getComponent(Sprite))
             .filter((s): s is Sprite => !!s);
@@ -234,6 +254,7 @@ export class ColorBlock extends Component {
 
         if (this.remaining <= 0 || (this._nextSlotIndex < 0 && this._pendingReleases <= 0)) {
             this._releasing = false;
+            if (this.remaining <= 0) this._onDepleted?.(this.blockIndex);
         }
     }
 
@@ -290,14 +311,46 @@ export class ColorBlock extends Component {
         return this._hasBeenClicked;
     }
 
+    /** 所有类型 ColorBlock 共用的耗尽退场：先缩小，再隐藏根节点。 */
+    public playDepleteAndHide(): void {
+        if (!this.node.isValid || !this.node.active) return;
+        Tween.stopAllByTarget(this.node);
+        tween(this.node)
+            .to(
+                CFG.colorBlockDepleteDuration,
+                { scale: new Vec3(0, 0, this._baseScale.z) },
+                { easing: 'quadIn' },
+            )
+            .call(() => {
+                if (!this.node.isValid) return;
+                this.node.active = false;
+                this.node.setScale(this._baseScale);
+            })
+            .start();
+    }
+
     public setClickEnabled(enabled: boolean): void {
         if (this._clickEnabled === enabled) {
             this.redrawLid();
             return;
         }
         this._clickEnabled = enabled;
-        if (enabled) this.playUnlockTweens();
+        if (enabled) {
+            this.revealBlockType();
+            this.playUnlockTweens();
+        }
         else this.restoreLockedVisual();
+    }
+
+    /** Unknown 只隐藏信息；解锁后恢复为标准 ColorBlock 的完整流程。 */
+    private revealBlockType(): void {
+        if (this._typeRevealed) return;
+        this._typeRevealed = true;
+        if (this._unknown) this._unknown.active = false;
+        if (this._slotsRoot) this._slotsRoot.active = true;
+        this.redrawBackground();
+        this.redrawDots();
+        this.redrawLidColor();
     }
 
     /** 解锁时并行播放：格子脉冲 + Lid 缩小消失。 */
@@ -346,6 +399,10 @@ export class ColorBlock extends Component {
 
     /** 更新格子：只使用 Prefab 中已有的 Background 与 Slot Sprite。 */
     private redraw(): void {
+        const concealed = this.blockType === ColorBlockType.Unknown && !this._typeRevealed;
+        if (this._unknown) this._unknown.active = concealed;
+        if (this._background) this._background.active = true;
+        if (this._slotsRoot) this._slotsRoot.active = !concealed;
         this.redrawBackground();
         this.redrawDots();
         this.redrawLid();
@@ -354,6 +411,11 @@ export class ColorBlock extends Component {
     /** 背景染色：直接设置 Background 节点上 Sprite 的颜色，不再用 Graphics 计算绘制 */
     private redrawBackground(): void {
         if (!this._bgSprite) return;
+
+        if (this.blockType === ColorBlockType.Unknown && !this._typeRevealed) {
+            this._bgSprite.color = this._bgBaseColor.clone();
+            return;
+        }
 
         const empty = this.isEmpty();
         const base = getColor(this.colorId);
@@ -389,6 +451,10 @@ export class ColorBlock extends Component {
     }
 
     private redrawLidColor(): void {
+        if (this.blockType === ColorBlockType.Unknown && !this._typeRevealed) {
+            if (this._lidSprite) this._lidSprite.color = new Color(255, 255, 255, 255);
+            return;
+        }
         const base = getColor(this.colorId);
         if (this._lidSprite) {
             this._lidSprite.color = new Color(base.r, base.g, base.b, this._lidSprite.color.a);
@@ -409,6 +475,7 @@ export class ColorBlock extends Component {
         this._onRelease = null;
         this._onActivated = null;
         this._canActivate = null;
+        this._onDepleted = null;
         for (let i = 0; i < this._slotNodes.length; i++) {
             this.restoreSlot(i, i < this.remaining);
         }
@@ -426,6 +493,7 @@ export class ColorBlock extends Component {
         this._onRelease = null;
         this._onActivated = null;
         this._canActivate = null;
+        this._onDepleted = null;
         this.node.off(Node.EventType.TOUCH_END, this.onTouch, this);
     }
 }

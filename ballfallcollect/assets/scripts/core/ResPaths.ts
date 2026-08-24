@@ -41,6 +41,7 @@ export const SceneNames = {
 export const PrefabNames = {
     Ball: 'Ball',
     ColorBlock: 'ColorBlock',
+    ColorBlockBoxes: 'ColorBlockBoxes',
     VSlot: 'VSlot',
     CollectBox: 'CollectBox',
 } as const;

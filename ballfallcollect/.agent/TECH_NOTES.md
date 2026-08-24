@@ -100,7 +100,7 @@ Game (cc.Scene)
 | 谁负责 | 内容 |
 |---|---|
 | **用户（编辑器）** | VSlot/EntranceGate/Startgridpos 的位置与尺寸、ColorBlock Prefab 尺寸、UI、美术 |
-| **LevelGrids.json** | 20 关数据：最多 5 列网格、颜色池、箱序模式、seed/shuffle |
+| **LevelGrids.json** | 20 关数据：最多 5 列的类型网格、颜色池、箱序模式、seed/shuffle |
 | **LevelDef** | JSON 安装后的只读运行时结构；不再维护硬编码 `LEVELS` 数组 |
 | **代码** | 实例化 VSlot → 从 Startgridpos 生成网格 → 分配颜色 → 物理 → 轨道 → 收纳箱 → 胜负 |
 
@@ -177,6 +177,7 @@ SystemStatic(墙) → Track → BoxLayer → BallLayer(下落/等待) → TrackB
 | 轨道外球上限 | 点击时整批预占 `ballsPerBlock`，轨道 `tryAccept` 成功后逐球释放；上限=`ballsPerBlock × maxUntrackedBallBatches`（当前 54） | 不能只数已 instantiate 的球，否则快速连点会在 Slot Tween 期间突破上限 |
 | 入口**每帧最多放行 1 球** | `handleEntry` 只处理队首 | 防止同帧多球抢占同一槽位 |
 | 槽位**立即占位** | `tryAccept` 先写 `_slots[i]` 再播吸附动画 | 动画期间槽位不能被再次分配 |
+| 轨道球连续补位 | 按入轨顺序以首球为头，后球沿轨道以 `trackCatchUpSpeedMultiplier` 逐槽追赶；目标槽先预留，真正到位后才转移 `_slots` 所有权 | 禁止瞬间压紧数组或跨越已占槽；追赶途中仍保持 OnTrack，可正常收纳，收纳时必须释放目标预留 |
 | Gate 与轨道留缝 | 轨道上沿位于 EntranceGate 下方 `CFG.trackEntryGap`；小球以两段 Tween 上抬再落入槽位 | Gate 仍是物理挡板和捕获区中心，不随轨道视觉间隙移动 |
 | 入轨球渲染层 | `tryAccept` 成功后保世界坐标切到 `TrackBallLayer` 再 Tween | 跳入/在轨小球始终盖住 V 槽中尚未被接收的 Ball |
 | 先到先入 | `waitTicket` 自增票号排序 | 避免物理堆积顺序带来的不确定性 |
@@ -205,10 +206,15 @@ VSlot [VSlot]
 └─ Startgridpos     ← ColorBlockGrid 的底部中心；不得挂 StaticPlate
 
 ColorBlockGrid [UITransform anchor=(0.5,0)]  ← 运行时节点
-└─ ColorBlock × LevelGrids.json 当前 gridId 中的 1
+└─ ColorBlock × LevelGrids.json 当前 gridId 中的非空类型单元
 ```
 
-- `grid` 使用 1/0；每行的 1 必须从左连续排列，有效宽度从上到下不得增加，禁止内部空洞
+- `grid` 单元使用自然数类型码：`0=空、1=normal、2=unknown、3=boxes`；代码中由 `ColorBlockType` 数值枚举作为唯一解释
+- 新增 ColorBlock 类型时必须同时扩展 `ColorBlockType`、校验器与对应表现策略，禁止在 GameManager 散写类型分支
+- `unknown` 不得出现在最后一行；解锁前 `Unknown` 节点遮蔽信息、Slots 隐藏，Background 显示 Prefab 原色但不赋玩法颜色；解锁时恢复颜色并复用标准动画
+- `boxes` 不得出现在最后一行，且直接下方必须是 normal/unknown；`Num(Label)` 留空时使用 `CFG.colorBlockBoxesDefaultCount`，成功点击后等待 `colorBlockBoxesDispatchDelay` 再显示并 Tween 派发
+- Boxes 内容在构建 `LevelPlan` 前就 instantiate 为 inactive ColorBlock，因此颜色数、总球数、Auto 收纳箱数从开局就一致；派发到位前不可点击
+- ColorBlock 耗尽回调由 `GameManager.onColorBlockDepleted()` 统一调用 `playDepleteAndHide()`：根节点缩小后隐藏，normal/unknown/boxes 派发格子不得分叉保留 Background
 - 所有行等长，最多 5 列；空位因此只存在于右侧或下方外围
 - GameManager 保存生成格子的 row/col，并建立四方向邻接索引。只有全局最底行初始解锁；格子成功开始释放时解锁上/下/左/右邻居
 - `ColorBlock.prefab/Lid(Sprite)` 是锁定遮罩：setup 时赋予本格颜色，锁定显示、解锁隐藏；禁止运行时动态创建 Lid

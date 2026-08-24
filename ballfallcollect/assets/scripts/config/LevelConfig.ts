@@ -5,7 +5,7 @@ import { BallColor, CFG, COLOR_TABLE } from '../core/GameTypes';
  *
  * ============ 核心分离原则 ============
  * **VSlot Prefab** = 共用的物理汇流结构、EntranceGate 与 Startgridpos
- * **LevelGrids.json** = 完整关卡事实源：网格、颜色、箱列顺序、难度与随机方式
+ * **LevelGrids.json** = 完整关卡事实源：网格类型、颜色、箱列顺序与随机方式
  * **LevelDef**      = JSON 解析后的运行时只读结构
  * ======================================
  */
@@ -26,6 +26,14 @@ export enum ShuffleMode {
     /** 只打乱箱子顺序 */
     Boxes = 'boxes',
     Both = 'both',
+}
+
+/** ColorBlock 类型注册入口；后续新增类型时在此扩展并补充对应表现策略。 */
+export enum ColorBlockType {
+    Empty = 0,
+    Normal = 1,
+    Unknown = 2,
+    Boxes = 3,
 }
 
 export interface LevelDef {
@@ -67,8 +75,16 @@ export const PALETTE: ReadonlyArray<BallColor> = [
     BallColor.Orange,
 ];
 
-export type GridCell = 0 | 1;
+/** 数值编码：0=空位，1=普通，2=Unknown，3=ColorBlockBoxes。 */
+export type GridCell = ColorBlockType;
 export type LevelGrid = ReadonlyArray<ReadonlyArray<GridCell>>;
+
+export function isValidBlockType(cell: unknown): cell is ColorBlockType {
+    return cell === ColorBlockType.Empty ||
+        cell === ColorBlockType.Normal ||
+        cell === ColorBlockType.Unknown ||
+        cell === ColorBlockType.Boxes;
+}
 
 let _levels: ReadonlyArray<LevelDef> = [];
 

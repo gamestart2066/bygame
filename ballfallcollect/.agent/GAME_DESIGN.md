@@ -46,10 +46,15 @@
 
 - 顶部若干**单色**格子，每格含 **9 个**同色小球
 - 每个格子下方各有一个 V 型槽（一一对应）
-- 完整关卡数据保存在 `play/config/LevelGrids.json`：网格、颜色池、箱序模式和随机种子；运行时以 `VSlot/Startgridpos` 为底部中心生成，最多 5 列
+- 完整关卡数据保存在 `play/config/LevelGrids.json`：类型网格、颜色池、箱序模式和随机种子；运行时以 `VSlot/Startgridpos` 为底部中心生成，最多 5 列
 - 网格水平居中、向上展开；间距为 ColorBlock Prefab 实际节点尺寸 + `CFG.colorBlockGridGap`
+- 网格单元使用自然数类型码：`0=空位、1=normal、2=unknown、3=boxes`；代码中由 `ColorBlockType` 数值枚举统一解释
 - 空位只能位于每行右侧及下方外围，不允许内部挖空；颜色由代码运行时分配
 - 网格最底行初始可点击；其他 ColorBlock 锁定，只有上/下/左/右相邻格被点击后才解锁
+- `unknown` 类型禁止出现在最底行；解锁前显示 `Unknown` 和 Background，Background 保持 Prefab 原色而不赋玩法颜色，Slots 隐藏；邻格点击解锁时隐藏 Unknown、恢复实际颜色，并播放标准解锁动画
+- `boxes` 使用 `ColorBlockBoxes.prefab`，不得出现在最底行，直接下方必须是 normal/unknown；下方格子成功点击时向该位置派发下一个 ColorBlock
+- Boxes 内待派发 ColorBlock 在关卡初始化时就必须分配颜色并计入总球数/收纳箱容量；`Num(Label)` 的正整数为派发数，留空默认 3
+- 任何类型或来源的 ColorBlock 在所有小球成功释放后，统一播放根节点缩小退场动画再隐藏，不保留空 Background
 - 锁定格显示 Prefab 的 `Lid`，解锁后隐藏；Lid 初始化颜色跟随该 ColorBlock
 - ColorBlock 解锁时播放一次自身缩放脉冲，同时 Lid 平滑缩小至消失
 - 轨道外（含尚在 ColorBlock 前置动画中）的已释放批次最多累计 6×9=54 球；整批点击会超过上限时拒绝释放并飘字“小球太多了”
@@ -147,7 +152,7 @@
 | | 内容 | 谁决定 |
 |---|---|---|
 | `VSlot.prefab` | V 槽、`EntranceGate`、网格底部中心 `Startgridpos` | 用户在编辑器摆放 |
-| `play/config/LevelGrids.json` | 20 关的网格、颜色种类/颜色池、箱子 4 列排列方式、随机方式 | JSON 唯一事实源 |
+| `play/config/LevelGrids.json` | 20 关的 ColorBlock 类型网格、颜色池、箱子 4 列排列方式、随机方式 | JSON 唯一事实源 |
 | `LevelDef`（`config/LevelConfig.ts`） | JSON 解析后的运行时类型与生成规则 | 代码 |
 
 - 箱子生成两种模式：`Auto`（由格子推箱子）/ `Manual`（由箱子列反推格子数）

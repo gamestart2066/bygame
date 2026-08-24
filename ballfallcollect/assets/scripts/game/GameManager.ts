@@ -7,13 +7,14 @@ import { EventBus, GameEvent, GameResultData } from '../core/EventBus';
 import { ResManager } from '../core/ResManager';
 import { PrefabNames, ResPaths } from '../core/ResPaths';
 import {
-    buildLevelPlan, installLevelConfig, LevelDef, LevelGrid, LevelPlan,
+    buildLevelPlan, ColorBlockType, installLevelConfig, LevelDef, LevelGrid, LevelPlan,
 } from '../config/LevelConfig';
 import { LevelManager } from '../config/LevelManager';
 import { LevelValidator, TerrainInfo } from '../config/LevelValidator';
 import { Ball } from './Ball';
 import { BallPool } from './BallPool';
 import { ColorBlock } from './ColorBlock';
+import { ColorBlockBoxes } from './ColorBlockBoxes';
 import { CollectBox } from './CollectBox';
 import { TrackSystem } from './TrackSystem';
 import { VSlot } from './VSlot';
@@ -46,7 +47,11 @@ export class GameManager extends Component {
 
     private _blocks: ColorBlock[] = [];
     private _blockGridCoords: Array<{ row: number; col: number }> = [];
+    private _blockTypes: ColorBlockType[] = [];
+    /** true 表示该 ColorBlock 尚在 Boxes 内，不参与初始解锁与网格占位。 */
+    private _blockStaged: boolean[] = [];
     private _blockIndexByCell: Map<string, number> = new Map();
+    private _blockBoxesByCell: Map<string, ColorBlockBoxes> = new Map();
     private _vslots: VSlot[] = [];
     /** 全局查询集合（补位逻辑不以它为准） */
     private _boxes: CollectBox[] = [];
@@ -57,6 +62,7 @@ export class GameManager extends Component {
     private _ballPool: BallPool = new BallPool();
     private _collectBoxPrefab: Prefab | null = null;
     private _colorBlockPrefab: Prefab | null = null;
+    private _colorBlockBoxesPrefab: Prefab | null = null;
     private _vslotPrefab: Prefab | null = null;
 
     private _terrainLayer: Node | null = null;
@@ -132,11 +138,16 @@ export class GameManager extends Component {
         this._colorBlockPrefab = await ResManager.load(
             ResPaths.prefab(PrefabNames.ColorBlock), Prefab
         );
+        this._colorBlockBoxesPrefab = await ResManager.load(
+            ResPaths.prefab(PrefabNames.ColorBlockBoxes), Prefab
+        );
         this._vslotPrefab = await ResManager.load(
             ResPaths.prefab(PrefabNames.VSlot), Prefab
         );
         const grid = def.grid;
-        if (!this._collectBoxPrefab || !this._colorBlockPrefab || !this._vslotPrefab || !grid) {
+        const needsBlockBoxes = grid.some((row) => row.includes(ColorBlockType.Boxes));
+        if (!this._collectBoxPrefab || !this._colorBlockPrefab || !this._vslotPrefab || !grid ||
+            (needsBlockBoxes && !this._colorBlockBoxesPrefab)) {
             const errors = [
                 `必需 Prefab 或网格 ${def.gridId} 加载失败，关卡已阻止启动。`,
             ];
@@ -239,7 +250,7 @@ export class GameManager extends Component {
         this._trackBallLayer.setPosition(0, 0, 0);
     }
 
-    /** 由 JSON 网格生成本关唯一 VSlot 与 ColorBlock 网格。 */
+    /** 由 JSON 网格生成本关唯一 VSlot、ColorBlock 与 Boxes。 */
     private buildConfiguredTerrain(def: LevelDef, grid: LevelGrid): TerrainInfo | null {
         if (!this._terrainLayer || !this._vslotPrefab || !this._colorBlockPrefab) return null;
 
@@ -254,10 +265,66 @@ export class GameManager extends Component {
             return null;
         }
 
-        const blocks: Array<{ node: Node; row: number; col: number; block: ColorBlock }> = [];
+        const blocks: Array<{
+            node: Node; row: number; col: number; type: ColorBlockType;
+            block: ColorBlock; staged: boolean;
+        }> = [];
+        const blockBoxes: Array<{
+            node: Node; row: number; col: number; box: ColorBlockBoxes; staged: ColorBlock[];
+        }> = [];
+        const cleanupGridItems = (): void => {
+            for (const item of blocks) {
+                if (item.node.isValid) item.node.destroy();
+            }
+            for (const item of blockBoxes) {
+                if (item.node.isValid) item.node.destroy();
+            }
+        };
         for (let row = 0; row < grid.length; row++) {
             for (let col = 0; col < grid[row].length; col++) {
-                if (grid[row][col] !== 1) continue;
+                const type = grid[row][col];
+                if (type === ColorBlockType.Empty) continue;
+                if (type === ColorBlockType.Boxes) {
+                    if (!this._colorBlockBoxesPrefab) return null;
+                    const node = instantiate(this._colorBlockBoxesPrefab);
+                    const ui = node.getComponent(UITransform);
+                    const box = node.getComponent(ColorBlockBoxes) ?? node.addComponent(ColorBlockBoxes);
+                    if (!ui) {
+                        console.error('[GameManager] ColorBlockBoxes.prefab 根节点必须包含 UITransform。');
+                        node.destroy();
+                        vslotNode.destroy();
+                        cleanupGridItems();
+                        return null;
+                    }
+                    const staged: ColorBlock[] = [];
+                    const count = box.resolveConfiguredCount();
+                    for (let i = 0; i < count; i++) {
+                        const blockNode = instantiate(this._colorBlockPrefab);
+                        const block = blockNode.getComponent(ColorBlock);
+                        const blockUI = blockNode.getComponent(UITransform);
+                        if (!block || !blockUI) {
+                            console.error('[GameManager] Boxes 内容仍要求 ColorBlock.prefab 根节点挂 ColorBlock/UITransform。');
+                            blockNode.destroy();
+                            node.destroy();
+                            vslotNode.destroy();
+                            cleanupGridItems();
+                            return null;
+                        }
+                        blockNode.active = false;
+                        staged.push(block);
+                        blocks.push({
+                            node: blockNode,
+                            row: row + 1,
+                            col,
+                            type: ColorBlockType.Normal,
+                            block,
+                            staged: true,
+                        });
+                    }
+                    box.setup(staged);
+                    blockBoxes.push({ node, row, col, box, staged });
+                    continue;
+                }
                 const node = instantiate(this._colorBlockPrefab);
                 const block = node.getComponent(ColorBlock);
                 const ui = node.getComponent(UITransform);
@@ -265,10 +332,10 @@ export class GameManager extends Component {
                     console.error('[GameManager] ColorBlock.prefab 必须在根节点挂 ColorBlock 和 UITransform。');
                     node.destroy();
                     vslotNode.destroy();
-                    for (const item of blocks) item.node.destroy();
+                    cleanupGridItems();
                     return null;
                 }
-                blocks.push({ node, row, col, block });
+                blocks.push({ node, row, col, type, block, staged: false });
             }
         }
         if (blocks.length === 0) {
@@ -302,6 +369,15 @@ export class GameManager extends Component {
             item.node.setParent(gridRoot);
             item.node.setPosition(
                 -gridWidth / 2 + blockWidth / 2 + item.col * stepX,
+                blockHeight / 2 + (rows - 1 - (item.staged ? item.row - 1 : item.row)) * stepY,
+                0,
+            );
+            item.node.active = !item.staged;
+        }
+        for (const item of blockBoxes) {
+            item.node.setParent(gridRoot);
+            item.node.setPosition(
+                -gridWidth / 2 + blockWidth / 2 + item.col * stepX,
                 blockHeight / 2 + (rows - 1 - item.row) * stepY,
                 0,
             );
@@ -309,10 +385,17 @@ export class GameManager extends Component {
 
         this._blocks = blocks.map((item) => item.block);
         this._blockGridCoords = blocks.map((item) => ({ row: item.row, col: item.col }));
+        this._blockTypes = blocks.map((item) => item.type);
+        this._blockStaged = blocks.map((item) => item.staged);
         this._blockIndexByCell.clear();
+        this._blockBoxesByCell.clear();
         for (let i = 0; i < this._blockGridCoords.length; i++) {
+            if (this._blockStaged[i]) continue;
             const p = this._blockGridCoords[i];
             this._blockIndexByCell.set(`${p.row}:${p.col}`, i);
+        }
+        for (const item of blockBoxes) {
+            this._blockBoxesByCell.set(`${item.row}:${item.col}`, item.box);
         }
         this._vslots = [vslot];
         return {
@@ -332,18 +415,53 @@ export class GameManager extends Component {
             block.setup(
                 color,
                 i,
+                this._blockTypes[i] ?? ColorBlockType.Normal,
                 (c, spawnPos) => this.onBallReleased(c, spawnPos),
                 (index) => this.onColorBlockActivated(index),
                 () => this.tryReserveColorBlockBatch(),
+                (index) => this.onColorBlockDepleted(index),
             );
-            block.setClickEnabled(this._blockGridCoords[i]?.row === bottomRow);
+            block.node.active = !this._blockStaged[i];
+            block.setClickEnabled(!this._blockStaged[i] && this._blockGridCoords[i]?.row === bottomRow);
         }
+    }
+
+    /** 所有 ColorBlock 耗尽后统一隐藏根节点；解锁/派发已在成功点击时触发。 */
+    private onColorBlockDepleted(blockIndex: number): void {
+        const source = this._blocks[blockIndex];
+        if (source?.isValid) source.playDepleteAndHide();
+    }
+
+    /** 直接下方格子成功点击时，Boxes 立即开始派发下一块。 */
+    private tryDispatchFromAbove(blockIndex: number): void {
+        if (this._state !== GameState.Playing) return;
+        const source = this._blocks[blockIndex];
+        const p = this._blockGridCoords[blockIndex];
+        if (!source?.isValid || !p) return;
+        const boxes = this._blockBoxesByCell.get(`${p.row - 1}:${p.col}`);
+        if (!boxes?.isValid || !boxes.hasRemaining()) return;
+
+        const targetPosition = source.node.position.clone();
+        boxes.dispatchTo(
+            targetPosition,
+            (next) => {
+                if (this._state !== GameState.Playing || !next.isValid) return;
+                const nextIndex = this._blocks.indexOf(next);
+                if (nextIndex < 0) return;
+                this._blockStaged[nextIndex] = false;
+                this._blockIndexByCell.set(`${p.row}:${p.col}`, nextIndex);
+                next.setClickEnabled(true);
+                this.updateAllBlocksSpeedBoost();
+            },
+            () => this._state === GameState.Playing,
+        );
     }
 
     /** 点击一个已解锁格后，解锁其四方向相邻 ColorBlock。 */
     private onColorBlockActivated(blockIndex: number): void {
         const p = this._blockGridCoords[blockIndex];
         if (!p) return;
+        this.tryDispatchFromAbove(blockIndex);
         const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
         for (const [dr, dc] of directions) {
             const neighborIndex = this._blockIndexByCell.get(`${p.row + dr}:${p.col + dc}`);

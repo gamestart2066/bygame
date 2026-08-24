@@ -85,6 +85,14 @@ export const CFG = {
     colorBlockUnlockPulseDuration: 0.28,
     /** Lid 解锁缩小至消失的时长 */
     colorBlockLidHideDuration: 0.22,
+    /** ColorBlock 释放完全部小球后，根节点缩小至隐藏的时长 */
+    colorBlockDepleteDuration: 0.2,
+    /** ColorBlockBoxes 的 Num 未填有效正整数时，默认可派发格子数 */
+    colorBlockBoxesDefaultCount: 3,
+    /** 下方 ColorBlock 点击成功后，Boxes 开始派发前的等待时间 */
+    colorBlockBoxesDispatchDelay: 0.5,
+    /** ColorBlock 从 Boxes 起点沿网格移入下方目标位的时长 */
+    colorBlockBoxesDispatchDuration: 0.42,
     /** 点击后逐球释放的间隔（秒），避免同帧重叠穿透 */
     releaseInterval: 0.028,
     /** Slot 展示球释放动画：在各自原位先上抬，再下落并放大 */
@@ -130,9 +138,13 @@ export const CFG = {
     /** 固定离散槽位数量（已确定规则：24），按**路径弧长**均匀分布 */
     trackSlotCount: 24,
     /** 轨道线速度（像素/秒，沿路径），正值顺时针 */
-    trackSpeed: 250,
+    trackSpeed: 380,
     /** 本关所有 ColorBlock 都已点击后，轨道相对当前关卡基础速度的倍率 */
     trackAllBlocksClickedMultiplier: 2,
+    /** 非头球补齐空槽时的总速度倍率（相对当前轨道速度） */
+    trackCatchUpSpeedMultiplier: 1.8,
+    /** 追赶到目标槽位的吸附容差（像素） */
+    trackCatchUpSnapTolerance: 1.5,
     /** 绘制轨道时的采样段数（与逻辑同用一套路径函数，保证一致） */
     trackDrawSegments: 96,
     /** 入口捕获区尺寸；中心运行时取 EntranceGate 位置 */

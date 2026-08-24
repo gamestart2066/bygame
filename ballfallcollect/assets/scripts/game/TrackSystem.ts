@@ -6,6 +6,16 @@ import { Ball } from './Ball';
 
 const { ccclass } = _decorator;
 
+interface CatchUpState {
+    ball: Ball;
+    fromSlot: number;
+    targetSlot: number;
+    /** 相对原槽位已额外追赶的弧长。 */
+    advanced: number;
+    /** 从原槽位到目标槽位需要补齐的弧长。 */
+    distance: number;
+}
+
 /**
  * 轨道系统 —— **圆角矩形（跑道形 / Stadium）路径**。
  *
@@ -35,6 +45,12 @@ const { ccclass } = _decorator;
 export class TrackSystem extends Component {
     /** 槽位占用表，null = 空槽 */
     private _slots: (Ball | null)[] = [];
+    /** 入轨先后队列；不改变收纳规则，只用于确定追赶时的前球。 */
+    private _trackOrder: Ball[] = [];
+    /** 球沿轨道向前补空槽的连续运动状态。 */
+    private _catchUps: Map<Ball, CatchUpState> = new Map();
+    /** 追赶中的目标槽位需要预留，防止入轨球或其他追赶球抢占。 */
+    private _reservedTargets: Map<number, Ball> = new Map();
     /** 轨道累计行进弧长（像素） */
     private _travel: number = 0;
     /** 当前关卡运行时速度倍率，不回写全局配置。 */
@@ -197,6 +213,7 @@ export class TrackSystem extends Component {
     public findEntrySlot(): number {
         for (let i = 0; i < this._slots.length; i++) {
             if (this._slots[i] !== null) continue;
+            if (this._reservedTargets.has(i)) continue;
             if (Math.abs(this.arcDiff(this.getSlotArc(i), this.entryArc)) <= CFG.entryArcTolerance) {
                 return i;
             }
@@ -215,6 +232,7 @@ export class TrackSystem extends Component {
 
         // 立即占位，防止同帧内多个球抢占同一槽
         this._slots[slot] = ball;
+        this._trackOrder.push(ball);
         if (renderLayer && renderLayer.isValid && ball.node.parent !== renderLayer) {
             // 先保存世界位置再换层，跳入动画起点不能因渲染层切换而移动。
             const worldPos = ball.node.worldPosition.clone();
@@ -232,6 +250,12 @@ export class TrackSystem extends Component {
     /** 小球离开轨道（被收纳时调用） */
     public releaseSlot(slotIndex: number): void {
         if (slotIndex >= 0 && slotIndex < this._slots.length) {
+            const ball = this._slots[slotIndex];
+            if (ball) {
+                this.cancelCatchUp(ball);
+                const orderIndex = this._trackOrder.indexOf(ball);
+                if (orderIndex >= 0) this._trackOrder.splice(orderIndex, 1);
+            }
             this._slots[slotIndex] = null;
         }
     }
@@ -254,13 +278,108 @@ export class TrackSystem extends Component {
         this._travel += CFG.trackSpeed * this._speedMultiplier * dt;
         if (this._travel >= this.perimeter) this._travel -= this.perimeter;
 
+        this.cleanupTrackOrder();
+        this.planCatchUps();
+
+        const baseSpeed = CFG.trackSpeed * this._speedMultiplier;
+        const catchUpSpeed = baseSpeed * Math.max(0, CFG.trackCatchUpSpeedMultiplier - 1);
+
         for (let i = 0; i < this._slots.length; i++) {
             const ball = this._slots[i];
             if (ball && ball.isValid && ball.isOnTrack()) {
-                ball.setTrackPosition(this.getSlotPos(i));
+                const catchUp = this._catchUps.get(ball);
+                if (!catchUp) {
+                    ball.setTrackPosition(this.getSlotPos(i));
+                    continue;
+                }
+
+                catchUp.advanced = Math.min(
+                    catchUp.distance,
+                    catchUp.advanced + catchUpSpeed * Math.max(0, dt)
+                );
+                const remaining = catchUp.distance - catchUp.advanced;
+                if (remaining <= CFG.trackCatchUpSnapTolerance) {
+                    this.finishCatchUp(catchUp);
+                    continue;
+                }
+                ball.setTrackPosition(
+                    this.getPointAtLength(this.getSlotArc(catchUp.fromSlot) + catchUp.advanced)
+                );
             }
         }
         this.drawTrack();
+    }
+
+    /**
+     * 按入轨顺序让后球占据前球后方的紧邻槽位。
+     * 只规划空槽；球真实到位前不会提前重排 `_slots`。
+     */
+    private planCatchUps(): void {
+        let previous: Ball | null = null;
+        for (const ball of this._trackOrder) {
+            if (!ball.isValid || ball.isRecycled || !ball.isOnTrack()) continue;
+            if (!previous) {
+                previous = ball;
+                continue;
+            }
+            if (!this._catchUps.has(ball)) {
+                const gapSlots = (
+                    previous.slotIndex - ball.slotIndex + this._slots.length
+                ) % this._slots.length;
+                const targetSlot = (ball.slotIndex + 1) % this._slots.length;
+                if (gapSlots > 1 &&
+                    this._slots[targetSlot] === null &&
+                    !this._reservedTargets.has(targetSlot)) {
+                    const distance = this.perimeter / this._slots.length;
+                    if (distance > CFG.trackCatchUpSnapTolerance) {
+                        const state: CatchUpState = {
+                            ball,
+                            fromSlot: ball.slotIndex,
+                            targetSlot,
+                            advanced: 0,
+                            distance,
+                        };
+                        this._catchUps.set(ball, state);
+                        this._reservedTargets.set(targetSlot, ball);
+                    }
+                }
+            }
+            previous = ball;
+        }
+    }
+
+    /** 球真正到达新槽位时，再原子地转移槽位所有权。 */
+    private finishCatchUp(state: CatchUpState): void {
+        const { ball, fromSlot, targetSlot } = state;
+        if (this._slots[fromSlot] !== ball || this._slots[targetSlot] !== null) {
+            this.cancelCatchUp(ball);
+            return;
+        }
+        this._slots[fromSlot] = null;
+        this._slots[targetSlot] = ball;
+        ball.slotIndex = targetSlot;
+        ball.setTrackPosition(this.getSlotPos(targetSlot));
+        this._reservedTargets.delete(targetSlot);
+        this._catchUps.delete(ball);
+    }
+
+    /** 收纳/回收可在追赶途中发生，必须同步释放目标槽位预留。 */
+    private cancelCatchUp(ball: Ball): void {
+        const state = this._catchUps.get(ball);
+        if (!state) return;
+        if (this._reservedTargets.get(state.targetSlot) === ball) {
+            this._reservedTargets.delete(state.targetSlot);
+        }
+        this._catchUps.delete(ball);
+    }
+
+    private cleanupTrackOrder(): void {
+        for (let i = this._trackOrder.length - 1; i >= 0; i--) {
+            const ball = this._trackOrder[i];
+            if (ball.isValid && !ball.isRecycled && ball.slotIndex >= 0) continue;
+            this.cancelCatchUp(ball);
+            this._trackOrder.splice(i, 1);
+        }
     }
 
     // ==================== 绘制 ====================

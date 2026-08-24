@@ -1,5 +1,8 @@
 import { BallColor, CFG } from '../core/GameTypes';
-import { BoxFillMode, isValidColor, LevelDef, LevelGrid, LevelPlan } from './LevelConfig';
+import {
+    BoxFillMode, ColorBlockType, isValidBlockType, isValidColor,
+    LevelDef, LevelGrid, LevelPlan,
+} from './LevelConfig';
 
 /** 按关卡配置生成后的运行时地形统计。 */
 export interface TerrainInfo {
@@ -63,7 +66,7 @@ export class LevelValidator {
         return { ok: errors.length === 0, errors, warnings };
     }
 
-    /** 网格最多 5 列；每行 1 必须连续靠左，且有效宽度从上到下不得增加。 */
+    /** 网格最多 5 列；非空类型必须连续靠左，Boxes 必须有直接下方格子。 */
     private static checkGrid(def: LevelDef, grid: LevelGrid, errors: string[]): void {
         if (!Array.isArray(grid) || grid.length === 0) {
             errors.push(`ColorBlock 网格 ${def.gridId} 不能为空。`);
@@ -86,11 +89,13 @@ export class LevelValidator {
             let reachedEmpty = false;
             for (let col = 0; col < row.length; col++) {
                 const cell = row[col];
-                if (cell !== 0 && cell !== 1) {
-                    errors.push(`网格第 ${rowIndex + 1} 行第 ${col + 1} 列只能填 0 或 1。`);
+                if (!isValidBlockType(cell)) {
+                    errors.push(
+                        `网格第 ${rowIndex + 1} 行第 ${col + 1} 列类型 ${String(cell)} 不受支持。`
+                    );
                     continue;
                 }
-                if (cell === 0) reachedEmpty = true;
+                if (cell === ColorBlockType.Empty) reachedEmpty = true;
                 else {
                     if (reachedEmpty) {
                         errors.push(`网格第 ${rowIndex + 1} 行存在内部空洞；空位只能在右侧外围。`);
@@ -103,6 +108,25 @@ export class LevelValidator {
                 errors.push(`网格第 ${rowIndex + 1} 行比上一行更宽；空位只能向右下外围扩展。`);
             }
             previousWidth = width;
+        }
+
+        const lastRow = grid[grid.length - 1];
+        if (lastRow?.some((cell) => cell === ColorBlockType.Unknown)) {
+            errors.push('网格最后一行是初始唯一可点击行，禁止配置 unknown 类型。');
+        }
+        if (lastRow?.some((cell) => cell === ColorBlockType.Boxes)) {
+            errors.push('网格最后一行禁止配置 boxes：它必须有直接下方的 ColorBlock 作为派发目标。');
+        }
+        for (let row = 0; row < grid.length - 1; row++) {
+            for (let col = 0; col < columns; col++) {
+                if (grid[row][col] !== ColorBlockType.Boxes) continue;
+                const below = grid[row + 1][col];
+                if (below !== ColorBlockType.Normal && below !== ColorBlockType.Unknown) {
+                    errors.push(
+                        `网格第 ${row + 1} 行第 ${col + 1} 列 boxes 的直接下方必须是 normal 或 unknown ColorBlock。`
+                    );
+                }
+            }
         }
     }
 
