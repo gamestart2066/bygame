@@ -639,7 +639,7 @@
       "b": 245,
       "a": 255
     },
-    "_string": "点击顶部格子释放小球",
+    "_string": "",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 28,
@@ -1631,7 +1631,7 @@
     "_srcBlendFactor": 2,
     "_dstBlendFactor": 4,
     "_color": { "__type__": "cc.Color", "r": 255, "g": 225, "b": 90, "a": 255 },
-    "_string": "小球太多了",
+    "_string": "",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 32,

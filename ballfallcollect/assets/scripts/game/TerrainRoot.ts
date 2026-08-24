@@ -13,12 +13,10 @@ const { ccclass, property } = _decorator;
  * ├─ Blocks                  (可选分组容器)
  * │  ├─ ColorBlock           [ColorBlock]       ← 数量与坐标**全由用户决定**
  * │  └─ ...
- * ├─ VSlots                  (可选分组容器)
- * │  ├─ VSlot                [VSlot]
+ * ├─ VSlot                 [VSlot]
  * │  │  ├─ PlateL            [StaticPlate 自动补]
  * │  │  ├─ PlateR            [StaticPlate 自动补]
  * │  │  └─ EntranceGate      ← 名称固定，轨道入口基准
- * │  └─ ...
  * └─ Statics                 (可选) 额外挡板/斜板，挂 StaticPlate
  * =============================================
  *
@@ -36,18 +34,9 @@ export class TerrainRoot extends Component {
         return this.node.getComponentsInChildren(ColorBlock);
     }
 
-    /** 本地形内的所有 V 槽 */
-    public getVSlots(): VSlot[] {
-        return this.node.getComponentsInChildren(VSlot);
-    }
-
-    /** 统计 EntranceGate 数量（用于校验，入口选取逻辑仍在 GameManager） */
-    public countEntranceGates(): number {
-        let n = 0;
-        for (const vs of this.getVSlots()) {
-            if (vs.getEntranceGate()) n++;
-        }
-        return n;
+    /** 本地形内唯一的 V 槽。 */
+    public getVSlot(): VSlot | null {
+        return this.node.getComponentInChildren(VSlot);
     }
 
     public getName(): string {
@@ -60,14 +49,15 @@ export class TerrainRoot extends Component {
     public collectInfo(): {
         terrainName: string;
         blockCount: number;
-        vslotCount: number;
-        entranceGateCount: number;
+        hasVSlot: boolean;
+        hasEntranceGate: boolean;
     } {
+        const vslot = this.getVSlot();
         return {
             terrainName: this.getName(),
             blockCount: this.getBlocks().length,
-            vslotCount: this.getVSlots().length,
-            entranceGateCount: this.countEntranceGates(),
+            hasVSlot: !!vslot,
+            hasEntranceGate: !!vslot?.getEntranceGate(),
         };
     }
 

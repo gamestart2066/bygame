@@ -17,14 +17,14 @@
 - Cocos Creator 3.8.6 空工程，2D 竖屏 750×1334，引擎模块已按 2D 裁剪
 - Git 仓库（官方 `.gitignore` 模板）
 - 项目记忆机制：`AGENT.md` + `.agent/` 五文件 + `load-memory.mjs`
-- 代码静态自检：`node .agent/check-code.mjs` → 30 个 `.ts`，0 问题
+- 代码静态自检：`node .agent/check-code.mjs` → 31 个 `.ts`，0 问题
 
 ### 玩法核心（第一版 15 项需求已全部编码实现）
 
 格子 / 每格 9 球 / 点击释放 / V 槽汇聚 / 刚体重力 / 跑道形轨道 /
 24 离散槽位 / 自动入轨 / 彩色收纳箱 / 同色入箱 / 满 3 消失 / 24 容量限制 / 胜利 / 失败
 
-- **配置驱动关卡**：`play/config/LevelGrids.json` 是类型网格、颜色/箱序的唯一事实源；20 关使用数值单元 `0=空、1=normal、2=unknown、3=boxes` 并优先保持对称
+- **配置驱动关卡**：`play/config/LevelGrids.json` 是类型网格、path 配色/箱序的唯一事实源；统一使用 guided 生成，ColorBlock 按最短解锁 path 的百分位分段配色，箱序由 path 排序颜色倒序基准 + `boxShuffleSegments` 受控分段洗牌生成；网格上限为 7 列
 - **网格解锁**：最底行初始开放，点击后按四方向邻接逐步解锁；锁定态由 ColorBlock/Lid 显示
 - **ColorBlock 类型框架**：当前支持 normal、unknown 与 boxes；Boxes 预生成并预配色内部格子，下方格点击后逐个 Tween 派发，其球数从关卡开始就纳入收纳箱闭环
 - **场地球上限**：ColorBlock 点击时整批预占 9 个轨道外名额，上限 54；轨道接收后逐球释放名额，超限通过 HUD 字幕提示
@@ -47,7 +47,7 @@
 
 ### 资源
 
-- `play/prefab/`：`Ball.prefab` · `ColorBlock.prefab` · `VSlot.prefab` · `CollectBox.prefab`
+- `play/prefab/`：`Ball.prefab` · `ColorBlock.prefab` · `ColorBlockBoxes.prefab` · `VSlot.prefab` · `CollectBox.prefab`
 - `play/ui/`：`PauseUI.prefab` · `ResultUI.prefab`
 
 ---

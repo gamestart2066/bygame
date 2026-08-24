@@ -100,9 +100,11 @@ Game (cc.Scene)
 | 谁负责 | 内容 |
 |---|---|
 | **用户（编辑器）** | VSlot/EntranceGate/Startgridpos 的位置与尺寸、ColorBlock Prefab 尺寸、UI、美术 |
-| **LevelGrids.json** | 20 关数据：最多 5 列的类型网格、颜色池、箱序模式、seed/shuffle |
+| **LevelGrids.json** | 20 关数据：最多 7 列的类型网格、`blockColor` path 配色区间、seed、`boxShuffleSegments` |
 | **LevelDef** | JSON 安装后的只读运行时结构；不再维护硬编码 `LEVELS` 数组 |
 | **代码** | 实例化 VSlot → 从 Startgridpos 生成网格 → 分配颜色 → 物理 → 轨道 → 收纳箱 → 胜负 |
+
+- 每关只允许一个 VSlot；`GameManager` 使用单一 `_vslot: VSlot | null` 引用，入口直接读取该 Prefab 内的 EntranceGate，不保留多 VSlot/多入口分支
 
 网格根使用 `(anchorX=0.5, anchorY=0)`，位置取 VSlot 的 `Startgridpos`；水平按完整矩阵居中，向上展开。
 相邻中心步距 = ColorBlock Prefab 实际 UITransform 尺寸 + `CFG.colorBlockGridGap`（当前 10）。
@@ -110,7 +112,7 @@ Game (cc.Scene)
 #### 🚫 架构红线（违反即回退）
 
 **禁止**在 `GameManager` / `StaticBuilder` 中散写格子或 VSlot 的绝对坐标。
-ColorBlock 数量和网格形状只能来自 `play/config/LevelGrids.json`，网格最多 5 列；VSlot 空间基准只能来自 Prefab。
+ColorBlock 数量和网格形状只能来自 `play/config/LevelGrids.json`，网格最多 7 列；VSlot 空间基准只能来自 Prefab。
 
 > 配置只描述规则化网格，不替代 Prefab 空间基准；不要重新引入每关独立 Terrain Prefab 或散落坐标。
 
@@ -213,9 +215,13 @@ ColorBlockGrid [UITransform anchor=(0.5,0)]  ← 运行时节点
 - 新增 ColorBlock 类型时必须同时扩展 `ColorBlockType`、校验器与对应表现策略，禁止在 GameManager 散写类型分支
 - `unknown` 不得出现在最后一行；解锁前 `Unknown` 节点遮蔽信息、Slots 隐藏，Background 显示 Prefab 原色但不赋玩法颜色；解锁时恢复颜色并复用标准动画
 - `boxes` 不得出现在最后一行，且直接下方必须是 normal/unknown；`Num(Label)` 留空时使用 `CFG.colorBlockBoxesDefaultCount`，成功点击后等待 `colorBlockBoxesDispatchDelay` 再显示并 Tween 派发
-- Boxes 内容在构建 `LevelPlan` 前就 instantiate 为 inactive ColorBlock，因此颜色数、总球数、Auto 收纳箱数从开局就一致；派发到位前不可点击
+- Boxes 内容在构建 `LevelPlan` 前就 instantiate 为 inactive ColorBlock，因此颜色数、总球数、guided 收纳箱数从开局就一致；派发到位前不可点击
+- ColorBlock 的 `path` 是从最底行（path=1）经四方向相邻关系到达该格的最短解锁层级；Boxes 内格子依派发顺序在其直接下方目标格 path 上逐次 +1
+- `blockColor` 格式为 `[path排序累计百分比上限, [最小颜色id, 最大颜色id]]`，各上限必须严格递增且最后为 100；每段下限由上一段自动推导，按 path 稳定排序生成颜色后映射回原索引
+- `CFG.debugShowColorBlockPath` 默认关闭；临时开启后运行时显示带黑色描边的 `P1/P2/...`，不得依赖该调试节点承载玩法逻辑
+- 收纳箱 `flat` 必须按 path 排序后的 `blockColors` 从后向前展开（每格重复 `ballsPerBlock/boxCapacity` 次），再依 `boxShuffleSegments` 分段洗牌。段顺序不得交叉，同一 seed 必须可复现
 - ColorBlock 耗尽回调由 `GameManager.onColorBlockDepleted()` 统一调用 `playDepleteAndHide()`：根节点缩小后隐藏，normal/unknown/boxes 派发格子不得分叉保留 Background
-- 所有行等长，最多 5 列；空位因此只存在于右侧或下方外围
+- 所有行等长、最多 7 列；空位可位于任意位置，但所有非空节点必须通过上下左右相邻形成一个连通块，最底行至少有一个 normal ColorBlock
 - GameManager 保存生成格子的 row/col，并建立四方向邻接索引。只有全局最底行初始解锁；格子成功开始释放时解锁上/下/左/右邻居
 - `ColorBlock.prefab/Lid(Sprite)` 是锁定遮罩：setup 时赋予本格颜色，锁定显示、解锁隐藏；禁止运行时动态创建 Lid
 - 解锁表现使用两个并行 Tween：ColorBlock 根节点按 `CFG.colorBlockUnlockPulseScale/Duration` 脉冲，Lid 按 `colorBlockLidHideDuration` 缩小后隐藏；结束/取消时必须恢复两者 Prefab 基准 scale

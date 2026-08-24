@@ -5,28 +5,18 @@ import { BallColor, CFG, COLOR_TABLE } from '../core/GameTypes';
  *
  * ============ 核心分离原则 ============
  * **VSlot Prefab** = 共用的物理汇流结构、EntranceGate 与 Startgridpos
- * **LevelGrids.json** = 完整关卡事实源：网格类型、颜色、箱列顺序与随机方式
+ * **LevelGrids.json** = 完整关卡事实源：网格类型、颜色、seed 与分段箱序难度
  * **LevelDef**      = JSON 解析后的运行时只读结构
  * ======================================
  */
 
-/** 箱子生成方式 */
-export enum BoxFillMode {
-    /** 由配置**显式指定**每列颜色序列（可精确设计关卡） */
-    Manual = 'manual',
-    /** 由格子颜色**自动推导**（每色 9 球 → 3 箱），再依次分配到各列 */
-    Auto = 'auto',
+/** 唯一关卡生成模式：格子自动配色，箱序按倒序基准受控扰乱。 */
+export enum LevelGenerationMode {
+    Guided = 'guided',
 }
 
-/** 洗牌程度（难度杠杆之一） */
-export enum ShuffleMode {
-    None = 'none',
-    /** 只打乱格子的颜色分配 */
-    Blocks = 'blocks',
-    /** 只打乱箱子顺序 */
-    Boxes = 'boxes',
-    Both = 'both',
-}
+/** [path 排序累计百分比上限, [最小颜色 id, 最大颜色 id]]；下限由上一段上限自动推导。 */
+export type BlockColorRule = readonly [number, readonly [BallColor, BallColor]];
 
 /** ColorBlock 类型注册入口；后续新增类型时在此扩展并补充对应表现策略。 */
 export enum ColorBlockType {
@@ -43,37 +33,20 @@ export interface LevelDef {
     gridId: string;
     /** ColorBlock 网格，按从上到下的行顺序保存。 */
     grid: LevelGrid;
-    /**
-     * 使用几种颜色。
-     * - `Auto` 模式：决定给格子分配几种颜色
-     * - `Manual` 模式：仅作校验参考，真实颜色由 `boxColumns` 决定
-     */
-    colorKinds: number;
-    /** 可选：限定颜色池；不填则取 PALETTE 前 colorKinds 种 */
-    palette?: BallColor[];
-    boxFill: BoxFillMode;
-    /**
-     * Manual 模式下每列的颜色序列。
-     * 外层 = 列（长度应等于 `CFG.boxColumnCount`），
-     * 内层 index 0 = 队首（第一行，唯一可收球的那一格）。
-     */
-    boxColumns?: BallColor[][];
+    /** 唯一生成模式，当前固定为 guided。 */
+    mode: LevelGenerationMode;
+    /** 按 ColorBlock path 升序后，依百分比分段指定可用颜色 id 范围。 */
+    blockColor: BlockColorRule[];
     /** 随机种子；<=0 表示每次运行都不同 */
     seed: number;
-    shuffle: ShuffleMode;
+    /**
+     * 收纳箱倒序列表的分段占比；每段只在内部用 seed 洗牌。
+     * [] = 完全不扰乱；非空时合计必须为 1。
+     */
+    boxShuffleSegments: number[];
     /** 预留：特殊规则开关。第一版一律为空数组。 */
     specialRules: string[];
 }
-
-/** 默认颜色池（顺序即优先使用顺序） */
-export const PALETTE: ReadonlyArray<BallColor> = [
-    BallColor.Red,
-    BallColor.Blue,
-    BallColor.Green,
-    BallColor.Yellow,
-    BallColor.Purple,
-    BallColor.Orange,
-];
 
 /** 数值编码：0=空位，1=普通，2=Unknown，3=ColorBlockBoxes。 */
 export type GridCell = ColorBlockType;
@@ -153,6 +126,23 @@ export function getLevelDef(levelId: number): LevelDef | null {
     return _levels.find((l) => l.levelId === levelId) ?? null;
 }
 
+/** 按占比切分数组，每段独立洗牌，段与段之间的大顺序不变。 */
+function shuffleBySegments<T>(arr: T[], segments: ReadonlyArray<number>, rnd: () => number): void {
+    if (segments.length === 0 || arr.length <= 1) return;
+    let start = 0;
+    let cumulative = 0;
+    for (let i = 0; i < segments.length; i++) {
+        cumulative += segments[i];
+        const end = i === segments.length - 1
+            ? arr.length
+            : Math.max(start, Math.min(arr.length, Math.round(arr.length * cumulative)));
+        const part = arr.slice(start, end);
+        shuffle(part, rnd);
+        for (let j = 0; j < part.length; j++) arr[start + j] = part[j];
+        start = end;
+    }
+}
+
 export function getLevelCount(): number {
     return _levels.length;
 }
@@ -161,69 +151,38 @@ export function getLevelCount(): number {
  * 构建运行时关卡计划。
  *
  * @param def 关卡配置
- * @param blockCount 根据 JSON 网格实例化出的 ColorBlock 数量
+ * @param blockPaths 与运行时 ColorBlock 一一对应的最短解锁 path
  */
-export function buildLevelPlan(def: LevelDef, blockCount: number): LevelPlan {
+export function buildLevelPlan(def: LevelDef, blockPaths: ReadonlyArray<number>): LevelPlan {
     const rnd = makeRandom(def.seed);
     const colCount = Math.max(1, CFG.boxColumnCount);
-    const shufBlocks = def.shuffle === ShuffleMode.Blocks || def.shuffle === ShuffleMode.Both;
-    const shufBoxes = def.shuffle === ShuffleMode.Boxes || def.shuffle === ShuffleMode.Both;
-
-    let blockColors: BallColor[] = [];
-    let boxColumns: BallColor[][] = [];
-
-    if (def.boxFill === BoxFillMode.Manual && def.boxColumns) {
-        // ---- 手工模式：箱子是权威，反推格子颜色 ----
-        boxColumns = def.boxColumns.map((c) => c.slice());
-
-        const boxCount = new Map<BallColor, number>();
-        for (const col of boxColumns) {
-            for (const c of col) boxCount.set(c, (boxCount.get(c) ?? 0) + 1);
-        }
-        // 某色格子数 = 该色箱数 × 每箱容量 ÷ 每格球数
-        boxCount.forEach((n, color) => {
-            const blocks = (n * CFG.boxCapacity) / CFG.ballsPerBlock;
-            const whole = Math.round(blocks);
-            for (let i = 0; i < whole; i++) blockColors.push(color);
-        });
-        if (shufBlocks) shuffle(blockColors, rnd);
-    } else {
-        // ---- 自动模式：格子是权威，推导箱子 ----
-        const pool = (def.palette && def.palette.length > 0)
-            ? def.palette.slice()
-            : PALETTE.slice(0, Math.max(1, Math.min(def.colorKinds, PALETTE.length)));
-
-        const kinds = Math.max(1, Math.min(blockCount, pool.length));
-        const used = pool.slice(0, kinds);
-
-        blockColors = used.slice();
-        for (let i = used.length; i < blockCount; i++) {
-            blockColors.push(used[Math.floor(rnd() * used.length)]);
-        }
-        if (shufBlocks) shuffle(blockColors, rnd);
-
-        // 每色箱数 = 该色球数 / 每箱容量
-        const perColor = new Map<BallColor, number>();
-        for (const c of blockColors) perColor.set(c, (perColor.get(c) ?? 0) + 1);
-
-        const flat: BallColor[] = [];
-        perColor.forEach((blocks, color) => {
-            const boxes = (blocks * CFG.ballsPerBlock) / CFG.boxCapacity;
-            for (let i = 0; i < Math.round(boxes); i++) flat.push(color);
-        });
-        if (shufBoxes) shuffle(flat, rnd);
-
-        // 依次分配到各列
-        boxColumns = [];
-        for (let c = 0; c < colCount; c++) boxColumns.push([]);
-        for (let i = 0; i < flat.length; i++) {
-            boxColumns[i % colCount].push(flat[i]);
-        }
+    const orderedIndices = blockPaths
+        .map((path, index) => ({ path, index }))
+        .sort((a, b) => a.path - b.path || a.index - b.index);
+    const orderedColors: BallColor[] = [];
+    const blockColors: BallColor[] = new Array(blockPaths.length);
+    for (let rank = 0; rank < orderedIndices.length; rank++) {
+        const percentile = Math.floor(rank * 100 / Math.max(1, orderedIndices.length));
+        const rule = def.blockColor.find(([end]) => percentile <= end);
+        const minColor = rule?.[1][0] ?? BallColor.Red;
+        const maxColor = rule?.[1][1] ?? minColor;
+        const color = minColor + Math.floor(rnd() * (maxColor - minColor + 1)) as BallColor;
+        orderedColors.push(color);
+        blockColors[orderedIndices[rank].index] = color;
     }
 
-    if (shufBoxes && def.boxFill === BoxFillMode.Manual) {
-        // 手工模式下只在列内洗牌，不跨列，避免破坏设计意图
-        for (const col of boxColumns) shuffle(col, rnd);
+    // path 越大的格子越晚解锁；倒序后它们对应 flat 更靠前的收纳箱。
+    const boxesPerBlock = CFG.ballsPerBlock / CFG.boxCapacity;
+    const flat: BallColor[] = [];
+    for (let i = orderedColors.length - 1; i >= 0; i--) {
+        for (let n = 0; n < boxesPerBlock; n++) flat.push(orderedColors[i]);
+    }
+    shuffleBySegments(flat, def.boxShuffleSegments, rnd);
+
+    const boxColumns: BallColor[][] = [];
+    for (let c = 0; c < colCount; c++) boxColumns.push([]);
+    for (let i = 0; i < flat.length; i++) {
+        boxColumns[i % colCount].push(flat[i]);
     }
 
     const colorBallCount = new Map<BallColor, number>();

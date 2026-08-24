@@ -80,6 +80,8 @@ export const CFG = {
     blockHeight: 190,
     /** ColorBlock 配置网格中相邻节点的边缘间距 */
     colorBlockGridGap: 10,
+    /** 临时调试：在 ColorBlock 上显示最短解锁 path；正式运行默认关闭 */
+    debugShowColorBlockPath: false,
     /** ColorBlock 解锁时根节点脉冲倍率与总时长 */
     colorBlockUnlockPulseScale: 1.08,
     colorBlockUnlockPulseDuration: 0.28,

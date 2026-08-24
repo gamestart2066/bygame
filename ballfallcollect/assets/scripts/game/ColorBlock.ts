@@ -1,5 +1,6 @@
 import {
-    _decorator, Component, Node, Sprite, UITransform, Vec3, Color, EventTouch, Tween, tween,
+    _decorator, Component, Node, Sprite, UITransform, Vec3, Color, EventTouch, Tween, tween, Label,
+    LabelOutline,
 } from 'cc';
 import { BallColor, CFG, getColor } from '../core/GameTypes';
 import { BallVisuals } from './BallVisuals';
@@ -24,6 +25,8 @@ export class ColorBlock extends Component {
 
     public blockIndex: number = 0;
     public blockType: ColorBlockType = ColorBlockType.Normal;
+    /** 从初始可点击格到本格的最短解锁层级；1 表示可直接点击。 */
+    public path: number = 1;
 
     /** 剩余未释放的球数 */
     public remaining: number = CFG.ballsPerBlock;
@@ -67,6 +70,7 @@ export class ColorBlock extends Component {
     public setup(
         color: BallColor,
         index: number,
+        path: number,
         blockType: ColorBlockType,
         onRelease: (color: BallColor, spawnWorldPos: Vec3) => boolean,
         onActivated: (blockIndex: number) => void,
@@ -75,6 +79,7 @@ export class ColorBlock extends Component {
     ): void {
         this.colorId = color;
         this.blockIndex = index;
+        this.path = Math.max(1, Math.floor(path));
         this.blockType = blockType;
         this._typeRevealed = blockType !== ColorBlockType.Unknown;
         this.remaining = CFG.ballsPerBlock;
@@ -87,6 +92,7 @@ export class ColorBlock extends Component {
         this._canActivate = canActivate;
         this._onDepleted = onDepleted ?? null;
         this._initialized = true;
+        this.showPathDebug();
 
         this._background = this.node.getChildByPath('Background');
         if (this._background) {
@@ -130,6 +136,33 @@ export class ColorBlock extends Component {
 
         this.node.off(Node.EventType.TOUCH_END, this.onTouch, this);
         this.node.on(Node.EventType.TOUCH_END, this.onTouch, this);
+    }
+
+    /** 临时关卡调试：在每个 ColorBlock 顶层显示最短解锁 path。 */
+    private showPathDebug(): void {
+        let debugNode = this.node.getChildByName('PathDebug');
+        if (!CFG.debugShowColorBlockPath) {
+            if (debugNode) debugNode.active = false;
+            return;
+        }
+        if (!debugNode) {
+            debugNode = new Node('PathDebug');
+            debugNode.setParent(this.node);
+            const ui = debugNode.addComponent(UITransform);
+            ui.setContentSize(90, 40);
+            const label = debugNode.addComponent(Label);
+            label.fontSize = 30;
+            label.lineHeight = 34;
+            label.color = new Color(255, 255, 255, 255);
+            const outline = debugNode.addComponent(LabelOutline);
+            outline.color = new Color(0, 0, 0, 255);
+            outline.width = 3;
+        }
+        const label = debugNode.getComponent(Label);
+        if (label) label.string = `P${this.path}`;
+        debugNode.setPosition(0, 0, 0);
+        debugNode.setSiblingIndex(this.node.children.length - 1);
+        debugNode.active = true;
     }
 
     private onTouch(_e: EventTouch): void {

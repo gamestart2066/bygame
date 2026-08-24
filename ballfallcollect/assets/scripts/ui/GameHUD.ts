@@ -48,9 +48,6 @@ export class GameHUD extends UIPanel {
         EventBus.on(GameEvent.ProgressChanged, this.onProgressChanged, this);
         EventBus.on(GameEvent.Subtitle, this.onSubtitle, this);
         this.refreshLevel();
-        if (this.progressLabel) {
-            this.progressLabel.string = '点击顶部格子释放小球';
-        }
     }
 
     protected onDisable(): void {

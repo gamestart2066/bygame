@@ -48,11 +48,14 @@ export class GameManager extends Component {
     private _blocks: ColorBlock[] = [];
     private _blockGridCoords: Array<{ row: number; col: number }> = [];
     private _blockTypes: ColorBlockType[] = [];
+    /** 与 _blocks 一一对应的最短解锁层级。 */
+    private _blockPaths: number[] = [];
     /** true 表示该 ColorBlock 尚在 Boxes 内，不参与初始解锁与网格占位。 */
     private _blockStaged: boolean[] = [];
     private _blockIndexByCell: Map<string, number> = new Map();
     private _blockBoxesByCell: Map<string, ColorBlockBoxes> = new Map();
-    private _vslots: VSlot[] = [];
+    /** 每关唯一的 VSlot。 */
+    private _vslot: VSlot | null = null;
     /** 全局查询集合（补位逻辑不以它为准） */
     private _boxes: CollectBox[] = [];
     /** 真正的队列结构：每列一个独立数组 */
@@ -95,6 +98,7 @@ export class GameManager extends Component {
         // 此处只停异步状态并释放引用，禁止回收重挂或再次 destroy Scene 子节点。
         this._ballPool.releaseForSceneTeardown();
         this._balls.length = 0;
+        this._vslot = null;
         EventBus.offTarget(this);
     }
 
@@ -170,7 +174,7 @@ export class GameManager extends Component {
         }
 
         // 2. 依据配置网格实际生成的格子数构建计划，并严格校验
-        const plan = buildLevelPlan(def, this._blocks.length);
+        const plan = buildLevelPlan(def, this._blockPaths);
         const result = LevelValidator.validate(def, grid, plan, terrainInfo);
         LevelValidator.logResult(def.levelId, result);
 
@@ -397,13 +401,65 @@ export class GameManager extends Component {
         for (const item of blockBoxes) {
             this._blockBoxesByCell.set(`${item.row}:${item.col}`, item.box);
         }
-        this._vslots = [vslot];
+        this._blockPaths = this.calculateBlockPaths(blockBoxes);
+        if (this._blockPaths.some((path) => path <= 0)) {
+            console.error('[GameManager] 存在无法由最底行通过相邻关系解锁的 ColorBlock。');
+            gridRoot.destroy();
+            vslotNode.destroy();
+            return null;
+        }
+        this._vslot = vslot;
         return {
             terrainName: `Level_${def.levelId}_Grid`,
             blockCount: this._blocks.length,
-            vslotCount: 1,
-            entranceGateCount: vslot.getEntranceGate() ? 1 : 0,
+            hasVSlot: true,
+            hasEntranceGate: !!vslot.getEntranceGate(),
         };
+    }
+
+    /**
+     * 可见格以最底行为 path=1 做四方向 BFS；Boxes 内待派发格依派发顺序接在目标格之后。
+     * 仅计算配色层级，不改变运行时数组索引与相邻解锁关系。
+     */
+    private calculateBlockPaths(
+        blockBoxes: Array<{
+            row: number;
+            col: number;
+            staged: ColorBlock[];
+        }>,
+    ): number[] {
+        const paths = new Array(this._blocks.length).fill(0);
+        const visibleRows = this._blockGridCoords
+            .filter((_p, i) => !this._blockStaged[i])
+            .map((p) => p.row);
+        const bottomRow = visibleRows.length > 0 ? Math.max(...visibleRows) : -1;
+        const queue: number[] = [];
+        for (let i = 0; i < this._blocks.length; i++) {
+            if (!this._blockStaged[i] && this._blockGridCoords[i]?.row === bottomRow) {
+                paths[i] = 1;
+                queue.push(i);
+            }
+        }
+        const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+        for (let cursor = 0; cursor < queue.length; cursor++) {
+            const index = queue[cursor];
+            const p = this._blockGridCoords[index];
+            for (const [dr, dc] of directions) {
+                const next = this._blockIndexByCell.get(`${p.row + dr}:${p.col + dc}`);
+                if (next === undefined || paths[next] > 0) continue;
+                paths[next] = paths[index] + 1;
+                queue.push(next);
+            }
+        }
+        for (const item of blockBoxes) {
+            const targetIndex = this._blockIndexByCell.get(`${item.row + 1}:${item.col}`);
+            const targetPath = targetIndex === undefined ? 0 : paths[targetIndex];
+            for (let order = 0; order < item.staged.length; order++) {
+                const index = this._blocks.indexOf(item.staged[order]);
+                if (index >= 0 && targetPath > 0) paths[index] = targetPath + order + 1;
+            }
+        }
+        return paths;
     }
 
     /** 给地形里的每个格子分配颜色 */
@@ -415,6 +471,7 @@ export class GameManager extends Component {
             block.setup(
                 color,
                 i,
+                this._blockPaths[i] ?? 1,
                 this._blockTypes[i] ?? ColorBlockType.Normal,
                 (c, spawnPos) => this.onBallReleased(c, spawnPos),
                 (index) => this.onColorBlockActivated(index),
@@ -482,23 +539,14 @@ export class GameManager extends Component {
         return true;
     }
 
-    /**
-     * 解析轨道入口：取地形中 VSlot 下名为 `EntranceGate` 的子节点，
-     * 多个时取最低的那个。代码不决定它的坐标，只读取。
-     */
+    /** 读取本关唯一 VSlot 的 EntranceGate 世界坐标。 */
     private resolveEntryPos(): Vec3 {
         const ui = this.getComponent(UITransform);
-        let bestWorld: Vec3 | null = null;
-
-        for (const vs of this._vslots) {
-            const w = vs.getEntranceWorldPos();
-            if (!w) continue;
-            if (!bestWorld || w.y < bestWorld.y) bestWorld = w;
-        }
-        if (!bestWorld) {
+        const worldPos = this._vslot?.getEntranceWorldPos() ?? null;
+        if (!worldPos) {
             return new Vec3(CFG.fallbackEntryX, CFG.fallbackEntryY, 0);
         }
-        return ui ? ui.convertToNodeSpaceAR(bestWorld) : bestWorld.clone();
+        return ui ? ui.convertToNodeSpaceAR(worldPos) : worldPos.clone();
     }
 
     // ==================== 收纳箱：固定列 + 列内补位 ====================

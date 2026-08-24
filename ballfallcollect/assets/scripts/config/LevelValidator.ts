@@ -1,6 +1,6 @@
 import { BallColor, CFG } from '../core/GameTypes';
 import {
-    BoxFillMode, ColorBlockType, isValidBlockType, isValidColor,
+    ColorBlockType, isValidBlockType, isValidColor, LevelGenerationMode,
     LevelDef, LevelGrid, LevelPlan,
 } from './LevelConfig';
 
@@ -8,8 +8,8 @@ import {
 export interface TerrainInfo {
     terrainName: string;
     blockCount: number;
-    vslotCount: number;
-    entranceGateCount: number;
+    hasVSlot: boolean;
+    hasEntranceGate: boolean;
 }
 
 export interface ValidationResult {
@@ -33,6 +33,7 @@ export class LevelValidator {
     public static validateGrid(def: LevelDef, grid: LevelGrid): string[] {
         const errors: string[] = [];
         this.checkGrid(def, grid, errors);
+        this.checkGenerationConfig(def, errors);
         return errors;
     }
 
@@ -43,7 +44,7 @@ export class LevelValidator {
         const warnings: string[] = [];
 
         errors.push(...this.validateGrid(def, grid));                    // 网格配置
-        this.checkTerrainComponents(terrain, errors, warnings);          // ⑦
+        this.checkTerrainComponents(terrain, errors);                    // ⑦
         this.checkBlockColors(plan, errors);                             // ①
         this.checkBallCounts(plan, errors, warnings);                    // ②
         this.checkCapacityMatch(plan, errors);                           // ③
@@ -56,37 +57,76 @@ export class LevelValidator {
         if (plan.blockColors.length !== terrain.blockCount) {
             errors.push(
                 `格子数量不匹配：地形 ${terrain.terrainName} 实际有 ${terrain.blockCount} 个 ColorBlock，` +
-                `但关卡配置推导出需要 ${plan.blockColors.length} 个。` +
-                (def.boxFill === BoxFillMode.Manual
-                    ? '[Manual 模式下格子数由 boxColumns 反推，请调整地形或箱子配置]'
-                    : '[Auto 模式下请检查地形内容]')
+                `但关卡配置推导出需要 ${plan.blockColors.length} 个。`
             );
         }
 
         return { ok: errors.length === 0, errors, warnings };
     }
 
-    /** 网格最多 5 列；非空类型必须连续靠左，Boxes 必须有直接下方格子。 */
+    /** guided 模式、path 配色区间与收纳箱分段扰乱配置。 */
+    private static checkGenerationConfig(def: LevelDef, errors: string[]): void {
+        if (def.mode !== LevelGenerationMode.Guided) {
+            errors.push(`关卡生成模式只支持 guided，当前为 ${String(def.mode)}。`);
+        }
+        if (!Array.isArray(def.blockColor) || def.blockColor.length === 0) {
+            errors.push('blockColor 必须是非空数组。');
+        } else {
+            let previousEnd = -1;
+            for (let i = 0; i < def.blockColor.length; i++) {
+                const rule = def.blockColor[i];
+                if (!Array.isArray(rule) || rule.length !== 2) {
+                    errors.push(`blockColor 第 ${i + 1} 项必须为 [累计百分比上限, [最小颜色, 最大颜色]]。`);
+                    continue;
+                }
+                const [end, range] = rule;
+                if (!Number.isInteger(end) || end <= previousEnd || end > 100) {
+                    errors.push(`blockColor 第 ${i + 1} 项上限必须大于 ${previousEnd} 且不超过 100。`);
+                }
+                if (!Array.isArray(range) || range.length !== 2 ||
+                    !isValidColor(range[0]) || !isValidColor(range[1]) || range[0] > range[1]) {
+                    errors.push(`blockColor 第 ${i + 1} 项颜色范围非法。`);
+                }
+                previousEnd = end;
+            }
+            if (previousEnd !== 100) errors.push('blockColor 最后一段上限必须为 100。');
+        }
+        if (!Array.isArray(def.boxShuffleSegments)) {
+            errors.push('boxShuffleSegments 必须是数组。');
+            return;
+        }
+        if (def.boxShuffleSegments.length === 0) return;
+        let sum = 0;
+        for (const ratio of def.boxShuffleSegments) {
+            if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
+                errors.push(`boxShuffleSegments 包含非法占比 ${String(ratio)}，每项必须在 (0, 1] 内。`);
+                continue;
+            }
+            sum += ratio;
+        }
+        if (Math.abs(sum - 1) > 0.0001) {
+            errors.push(`boxShuffleSegments 非空时合计必须为 1，当前为 ${sum}。`);
+        }
+    }
+
+    /** 网格最多 7 列；空位位置不限，所有非空节点必须四方向连通。 */
     private static checkGrid(def: LevelDef, grid: LevelGrid, errors: string[]): void {
         if (!Array.isArray(grid) || grid.length === 0) {
             errors.push(`ColorBlock 网格 ${def.gridId} 不能为空。`);
             return;
         }
         const columns = grid[0]?.length ?? 0;
-        if (columns <= 0 || columns > 5) {
-            errors.push(`ColorBlock 网格列数必须为 1～5，当前为 ${columns}。`);
+        if (columns <= 0 || columns > 7) {
+            errors.push(`ColorBlock 网格列数必须为 1～7，当前为 ${columns}。`);
             return;
         }
 
-        let previousWidth = columns;
         for (let rowIndex = 0; rowIndex < grid.length; rowIndex++) {
             const row = grid[rowIndex];
             if (!Array.isArray(row) || row.length !== columns) {
                 errors.push(`网格第 ${rowIndex + 1} 行长度必须等于 ${columns}。`);
                 continue;
             }
-            let width = 0;
-            let reachedEmpty = false;
             for (let col = 0; col < row.length; col++) {
                 const cell = row[col];
                 if (!isValidBlockType(cell)) {
@@ -95,22 +135,13 @@ export class LevelValidator {
                     );
                     continue;
                 }
-                if (cell === ColorBlockType.Empty) reachedEmpty = true;
-                else {
-                    if (reachedEmpty) {
-                        errors.push(`网格第 ${rowIndex + 1} 行存在内部空洞；空位只能在右侧外围。`);
-                    }
-                    width++;
-                }
             }
-            if (width <= 0) errors.push(`网格第 ${rowIndex + 1} 行没有 ColorBlock。`);
-            if (width > previousWidth) {
-                errors.push(`网格第 ${rowIndex + 1} 行比上一行更宽；空位只能向右下外围扩展。`);
-            }
-            previousWidth = width;
         }
 
         const lastRow = grid[grid.length - 1];
+        if (!lastRow?.some((cell) => cell === ColorBlockType.Normal)) {
+            errors.push('网格最底行至少需要一个 normal ColorBlock，作为初始可点击入口。');
+        }
         if (lastRow?.some((cell) => cell === ColorBlockType.Unknown)) {
             errors.push('网格最后一行是初始唯一可点击行，禁止配置 unknown 类型。');
         }
@@ -128,25 +159,84 @@ export class LevelValidator {
                 }
             }
         }
+
+        // path 的事实来源与运行时一致：最底行 path=1，四方向相邻逐层 +1。
+        const reachable = new Set<string>();
+        const queue: Array<[number, number]> = [];
+        const bottom = grid.length - 1;
+        for (let col = 0; col < columns; col++) {
+            const cell = grid[bottom]?.[col];
+            if (cell === ColorBlockType.Normal || cell === ColorBlockType.Unknown) {
+                const key = `${bottom}:${col}`;
+                reachable.add(key);
+                queue.push([bottom, col]);
+            }
+        }
+        const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+        for (let cursor = 0; cursor < queue.length; cursor++) {
+            const [row, col] = queue[cursor];
+            for (const [dr, dc] of directions) {
+                const nr = row + dr;
+                const nc = col + dc;
+                const cell = grid[nr]?.[nc];
+                const key = `${nr}:${nc}`;
+                if ((cell !== ColorBlockType.Normal && cell !== ColorBlockType.Unknown) || reachable.has(key)) continue;
+                reachable.add(key);
+                queue.push([nr, nc]);
+            }
+        }
+        for (let row = 0; row < grid.length; row++) {
+            for (let col = 0; col < columns; col++) {
+                const cell = grid[row][col];
+                if ((cell === ColorBlockType.Normal || cell === ColorBlockType.Unknown) &&
+                    !reachable.has(`${row}:${col}`)) {
+                    errors.push(`网格第 ${row + 1} 行第 ${col + 1} 列无法从最底行通过相邻解锁到达。`);
+                }
+            }
+        }
+
+        // 所有非空节点（包含 Boxes）必须组成一个上下左右连通块。
+        const occupied: Array<[number, number]> = [];
+        for (let row = 0; row < grid.length; row++) {
+            for (let col = 0; col < columns; col++) {
+                if (grid[row][col] !== ColorBlockType.Empty) occupied.push([row, col]);
+            }
+        }
+        if (occupied.length === 0) {
+            errors.push('ColorBlock 网格至少需要一个非空节点。');
+            return;
+        }
+        const connected = new Set<string>();
+        const connectedQueue: Array<[number, number]> = [occupied[0]];
+        connected.add(`${occupied[0][0]}:${occupied[0][1]}`);
+        for (let cursor = 0; cursor < connectedQueue.length; cursor++) {
+            const [row, col] = connectedQueue[cursor];
+            for (const [dr, dc] of directions) {
+                const nr = row + dr;
+                const nc = col + dc;
+                const key = `${nr}:${nc}`;
+                if (connected.has(key) || grid[nr]?.[nc] === ColorBlockType.Empty || grid[nr]?.[nc] === undefined) continue;
+                connected.add(key);
+                connectedQueue.push([nr, nc]);
+            }
+        }
+        if (connected.size !== occupied.length) {
+            errors.push('所有 ColorBlock / Boxes 必须通过上下左右相邻形成一个连续整体。');
+        }
     }
 
     /** ⑦ Terrain Prefab 是否缺少必要组件 */
-    private static checkTerrainComponents(t: TerrainInfo, errors: string[], warnings: string[]): void {
+    private static checkTerrainComponents(t: TerrainInfo, errors: string[]): void {
         if (t.blockCount <= 0) {
             errors.push(`地形 ${t.terrainName} 中没有任何 ColorBlock，无法产生小球。`);
         }
-        if (t.vslotCount <= 0) {
+        if (!t.hasVSlot) {
             errors.push(`地形 ${t.terrainName} 中没有任何 VSlot，小球无处汇聚。`);
         }
-        if (t.entranceGateCount <= 0) {
+        if (!t.hasEntranceGate) {
             errors.push(
                 `地形 ${t.terrainName} 中找不到 EntranceGate 节点，轨道入口无法定位。` +
                 '请在 VSlot 预制体内添加名为 EntranceGate 的子节点。'
-            );
-        }
-        if (t.entranceGateCount > 1) {
-            warnings.push(
-                `地形中存在 ${t.entranceGateCount} 个 EntranceGate，只会采用最低的那个作为轨道入口。`
             );
         }
     }
@@ -226,13 +316,6 @@ export class LevelValidator {
                 `收纳箱列数为 ${plan.boxColumns?.length ?? 0}，应为 ${expect}（CFG.boxColumnCount）。`
             );
             return;
-        }
-        if (def.boxFill === BoxFillMode.Manual) {
-            if (!def.boxColumns || def.boxColumns.length !== expect) {
-                errors.push(
-                    `Manual 模式必须提供恰好 ${expect} 列的 boxColumns，当前为 ${def.boxColumns?.length ?? 0} 列。`
-                );
-            }
         }
         plan.boxColumns.forEach((col, i) => {
             if (!Array.isArray(col)) {
