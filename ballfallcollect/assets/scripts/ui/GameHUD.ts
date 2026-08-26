@@ -89,7 +89,7 @@ export class GameHUD extends UIPanel {
     private refreshLevel(): void {
         if (!this.levelLabel) return;
         const def = LevelManager.getCurrentDef();
-        this.levelLabel.string = def ? `第 ${def.levelId} 关 · ${def.name}` : '';
+        this.levelLabel.string = def ? `第 ${def.levelId} 关` : '';
     }
 
     private onProgressChanged(p: {

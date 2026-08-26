@@ -54,8 +54,10 @@ export const ResPaths = {
     prefab(name: string): string {
         return `${ResDirs.prefab}/${name}`;
     },
-    /** ColorBlock 网格 JSON：play/config/LevelGrids.json */
+    /** 关卡规则/难度 JSON：play/config/LevelGrids.json */
     levelGrids: 'config/LevelGrids',
+    /** ColorBlock 真实布局库：play/config/all_levels_simple_edited.json */
+    levelLayouts: 'config/all_levels_simple_edited',
     /** UI 预制体：play/ui/<name>（目前目录不存在，属于可选资源） */
     ui(name: string): string {
         return `${ResDirs.ui}/${name}`;

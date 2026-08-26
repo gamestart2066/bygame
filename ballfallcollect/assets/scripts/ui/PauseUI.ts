@@ -20,6 +20,9 @@ export class PauseUI extends UIPanel {
     @property({ type: Button, tooltip: '继续游戏按钮（留空则按 Board/BtnResume 自动查找）' })
     public btnResume: Button | null = null;
 
+    @property({ type: Button, tooltip: '重玩本关按钮（留空则按 Board/BtnRetry 自动查找）' })
+    public btnRetry: Button | null = null;
+
     @property({ type: Button, tooltip: '返回大厅按钮（留空则按 Board/BtnHall 自动查找）' })
     public btnHall: Button | null = null;
 
@@ -47,15 +50,20 @@ export class PauseUI extends UIPanel {
         if (!this.btnResume) {
             this.btnResume = this.findButton('Board/BtnResume', 'BtnResume');
         }
+        if (!this.btnRetry) {
+            this.btnRetry = this.findButton('Board/BtnRetry', 'BtnRetry');
+        }
         if (!this.btnHall) {
             this.btnHall = this.findButton('Board/BtnHall', 'BtnHall');
         }
 
         this.btnResume?.node.on(Button.EventType.CLICK, this.onResume, this);
+        this.btnRetry?.node.on(Button.EventType.CLICK, this.onRetry, this);
         this.btnHall?.node.on(Button.EventType.CLICK, this.onHall, this);
 
         const missing: string[] = [];
         if (!this.btnResume) missing.push('BtnResume');
+        if (!this.btnRetry) missing.push('BtnRetry');
         if (!this.btnHall) missing.push('BtnHall');
         if (missing.length) {
             console.warn(
@@ -85,6 +93,12 @@ export class PauseUI extends UIPanel {
 
     private onResume(): void {
         UIManager.close('Pause');
+    }
+
+    private onRetry(): void {
+        // 保留 LevelManager.currentId，重新进入 Game 即为重玩当前关。
+        EventBus.emit(GameEvent.GameResume);
+        SceneRouter.goGame();
     }
 
     private onHall(): void {

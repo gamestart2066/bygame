@@ -5,7 +5,7 @@ import { Color } from 'cc';
  * 原型阶段所有可调数值集中在此，便于快速迭代手感。
  */
 
-/** 小球颜色 ID（实际使用几种，由场景中的格子数量与 maxColorKinds 决定） */
+/** 小球颜色 ID；关卡配置可使用 0～9。 */
 export enum BallColor {
     Red = 0,
     Blue = 1,
@@ -13,6 +13,10 @@ export enum BallColor {
     Yellow = 3,
     Purple = 4,
     Orange = 5,
+    Cyan = 6,
+    Pink = 7,
+    Lime = 8,
+    Brown = 9,
 }
 
 /** 颜色 ID → 显示颜色 */
@@ -23,6 +27,10 @@ export const COLOR_TABLE: ReadonlyArray<Color> = [
     new Color(240, 200, 50, 255),   // Yellow
     new Color(170, 90, 220, 255),   // Purple
     new Color(245, 140, 50, 255),   // Orange
+    new Color(45, 205, 220, 255),   // Cyan
+    new Color(245, 90, 170, 255),   // Pink
+    new Color(145, 220, 55, 255),   // Lime
+    new Color(145, 90, 50, 255),    // Brown
 ];
 
 export function getColor(id: BallColor): Color {
@@ -105,8 +113,8 @@ export const CFG = {
     /** 完整前置 Tween 时长；结束后才允许生成真实 Ball */
     slotReleaseDuration: 0.2,
     ballsPerBlock: 9,
-    /** 轨道外最多允许同时滞留多少个 ColorBlock 批次的小球（6×9=54） */
-    maxUntrackedBallBatches: 6,
+    /** 轨道外最多允许同时滞留多少个 ColorBlock 批次的小球。 */
+    maxUntrackedBallBatches: 4,
 
     /** ---- 通用字幕飘字 ---- */
     subtitleRiseDistance: 60,
@@ -164,14 +172,12 @@ export const CFG = {
      */
     boxWidth: 108,
     boxHeight: 96,
-    /** 第一行（每列唯一可收球的那一行）的 Y */
-    boxY: -430,
     /** 固定列数 */
     boxColumnCount: 4,
     /** 相邻列中心点的 X 间距，应略大于 boxWidth */
     boxColumnSpacing: 125,
     /** 相邻行中心点的 Y 间距，应略大于 boxHeight */
-    boxRowSpacing: 80,
+    boxRowSpacing: 70,
     /** 列内向上补位的平移动画时长 */
     boxMoveDuration: 0.25,
     /** 收纳判定：球与箱的**水平**对齐阈值（球经过箱子上方即收纳）

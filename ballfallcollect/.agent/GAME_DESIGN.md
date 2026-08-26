@@ -46,7 +46,7 @@
 
 - 顶部若干**单色**格子，每格含 **9 个**同色小球
 - 每个格子下方各有一个 V 型槽（一一对应）
-- 完整关卡数据保存在 `play/config/LevelGrids.json`：类型网格、path 配色区间、seed 与箱序分段扰乱比例；运行时以 `VSlot/Startgridpos` 为底部中心生成，最多 7 列。空位可在任意位置，但所有非空节点必须上下左右连通，最底行至少有一个初始可点击 normal 格
+- ColorBlock 真实类型网格来自 `play/config/all_levels_simple_edited.json`；`LevelGrids.json.levels` 每条记录以 `layout` 直接引用其中的字符串 `levelId`，并维护 path 配色、seed 与箱序难度。运行时以 `VSlot/Startgridpos` 为底部中心生成，布局最多 8 列
 - 网格水平居中、向上展开；间距为 ColorBlock Prefab 实际节点尺寸 + `CFG.colorBlockGridGap`
 - 网格单元使用自然数类型码：`0=空位、1=normal、2=unknown、3=boxes`；代码中由 `ColorBlockType` 数值枚举统一解释
 - 空位可位于网格任意位置；所有非空节点必须上下左右连通，颜色由代码运行时分配
@@ -57,7 +57,7 @@
 - 任何类型或来源的 ColorBlock 在所有小球成功释放后，统一播放根节点缩小退场动画再隐藏，不保留空 Background
 - 锁定格显示 Prefab 的 `Lid`，解锁后隐藏；Lid 初始化颜色跟随该 ColorBlock
 - ColorBlock 解锁时播放一次自身缩放脉冲，同时 Lid 平滑缩小至消失
-- 轨道外（含尚在 ColorBlock 前置动画中）的已释放批次最多累计 6×9=54 球；整批点击会超过上限时拒绝释放并飘字“小球太多了”
+- 轨道外（含尚在 ColorBlock 前置动画中）的已释放批次最多累计 `CFG.maxUntrackedBallBatches × CFG.ballsPerBlock`（当前 4×9=36 球）；整批点击会超过上限时拒绝释放并飘字“小球太多了”
 - 点击后该格**逐个连续释放** 9 球（同帧生成会重叠，Box2D 会剧烈弹开）
 - 释放中的格子不响应重复点击；格子放空后统一缩小并隐藏根节点
 
@@ -151,11 +151,12 @@
 
 | | 内容 | 谁决定 |
 |---|---|---|
-| `VSlot.prefab` | V 槽、`EntranceGate`、网格底部中心 `Startgridpos` | 用户在编辑器摆放 |
-| `play/config/LevelGrids.json` | 20 关的 ColorBlock 类型网格、path 配色区间、seed 与箱序分段扰乱比例 | JSON 唯一事实源 |
+| `VSlot.prefab` | V 槽、`EntranceGate`、网格底部中心 `Startgridpos`、收纳箱第一行中心 `BoxCollectPos` | 用户在编辑器摆放 |
+| `play/config/all_levels_simple_edited.json` | ColorBlock 真实类型网格布局库 | 布局事实源 |
+| `play/config/LevelGrids.json` | 1000 关的直接布局引用、path 配色、seed 与箱序分段扰乱比例 | 关卡规则事实源 |
 | `LevelDef`（`config/LevelConfig.ts`） | JSON 解析后的运行时类型与生成规则 | 代码 |
 
-- 关卡只使用 `guided` 生成模式：最底行 ColorBlock 的 `path=1`，其余可见格按四方向相邻最短解锁路径逐层递增，Boxes 内格子按派发顺序接在目标格 path 之后
+- 关卡只有一种生成逻辑，无需配置 mode：最底行 ColorBlock 的 `path=1`，其余可见格按四方向相邻最短解锁路径逐层递增，Boxes 内格子按派发顺序接在目标格 path 之后
 - `blockColor` 使用 `[累计百分比上限, [最小颜色id, 最大颜色id]]`，按 path 升序后的百分位分段；生成结果再映射回原运行时索引，不改变解锁或 Boxes 派发关系
 - 收纳箱先按 path 排序后的 `blockColors` 倒序生成，使更晚解锁的 ColorBlock 对应更靠前的箱子
 - `boxShuffleSegments=[]` 表示完全保留倒序爽感排布；非空数组合计必须为 1，每段只在内部用本关 seed 洗牌，以分段大小控制难度
@@ -165,7 +166,7 @@
 - 本关所有 ColorBlock 都至少点击一次后，轨道速度立即变为当前关卡基础速度的 2 倍。
 - `releaseInterval` 是全局出球节奏，只在 `CFG` 中维护，不由关卡配置覆盖。
 
-**做新关卡 = 只在 `LevelGrids.json.levels` 增加完整关卡记录；禁止再维护 TypeScript 关卡数组。**
+**做新关卡 = 在 `LevelGrids.json.levels` 增加记录并用 `layout` 填写外部布局 ID；禁止再把 grid 复制进规则表或维护并行布局数组。**
 
 ---
 

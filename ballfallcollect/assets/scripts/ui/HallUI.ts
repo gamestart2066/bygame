@@ -73,7 +73,7 @@ export class HallUI extends UIPanel {
 
         const def = LevelManager.getCurrentDef();
         this.levelLabel.string = def
-            ? `第 ${def.levelId} 关 · ${def.name}\n网格配置：${def.gridId}`
+            ? `第 ${def.levelId} 关\n布局：${def.layout}`
             : '关卡配置缺失';
     }
 

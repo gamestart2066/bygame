@@ -18,7 +18,8 @@ const { ccclass, property } = _decorator;
  *   ├─ PlateL            [UITransform, Sprite, (StaticPlate 可自动补)]
  *   ├─ PlateR            [UITransform, Sprite, (StaticPlate 可自动补)]
  *   ├─ EntranceGate      [UITransform, Sprite, (StaticPlate 可自动补)]
- *   └─ Startgridpos      [UITransform，仅作 ColorBlock 网格底部中心锚点]
+ *   ├─ Startgridpos      [UITransform，仅作 ColorBlock 网格底部中心锚点]
+ *   └─ BoxCollectPos     [UITransform，仅作 CollectBox 第一行中心基准]
  *
  * `EntranceGate` 有双重作用：
  *   1) 物理挡板：无空槽时小球停在其上堆积等待
@@ -29,6 +30,7 @@ export class VSlot extends Component {
     /** 入口挡板的固定节点名，代码按此名称查找 */
     public static readonly ENTRANCE_GATE_NAME: string = 'EntranceGate';
     public static readonly GRID_START_NAME: string = 'Startgridpos';
+    public static readonly BOX_COLLECT_POS_NAME: string = 'BoxCollectPos';
 
     @property({ tooltip: '自动为所有子节点补挂 StaticPlate（生成静态碰撞体）' })
     public autoSetupChildren: boolean = true;
@@ -40,7 +42,9 @@ export class VSlot extends Component {
     /** 为每个子节点补上 StaticPlate，使其成为静态物理板 */
     private setupChildren(): void {
         for (const child of this.node.children) {
-            if (child.name === VSlot.GRID_START_NAME) continue;
+            if (child.name === VSlot.GRID_START_NAME || child.name === VSlot.BOX_COLLECT_POS_NAME) {
+                continue;
+            }
             if (!child.activeInHierarchy) continue;
             if (!child.getComponent(UITransform)) continue;
             if (!child.getComponent(StaticPlate)) {
@@ -70,6 +74,10 @@ export class VSlot extends Component {
 
     public getGridStart(): Node | null {
         return this.node.getChildByName(VSlot.GRID_START_NAME);
+    }
+
+    public getBoxCollectPos(): Node | null {
+        return this.node.getChildByName(VSlot.BOX_COLLECT_POS_NAME);
     }
 
     /** 子板数量，用于校验 Prefab 是否配置正确 */

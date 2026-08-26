@@ -5,15 +5,11 @@ import { BallColor, CFG, COLOR_TABLE } from '../core/GameTypes';
  *
  * ============ 核心分离原则 ============
  * **VSlot Prefab** = 共用的物理汇流结构、EntranceGate 与 Startgridpos
- * **LevelGrids.json** = 完整关卡事实源：网格类型、颜色、seed 与分段箱序难度
- * **LevelDef**      = JSON 解析后的运行时只读结构
+ * **LevelGrids.json** = 每关直接引用布局，并保存颜色、seed 与分段箱序难度
+ * **all_levels_simple_edited.json** = ColorBlock 真实布局库
+ * **LevelDef**      = 两份 JSON 合并后的运行时只读结构
  * ======================================
  */
-
-/** 唯一关卡生成模式：格子自动配色，箱序按倒序基准受控扰乱。 */
-export enum LevelGenerationMode {
-    Guided = 'guided',
-}
 
 /** [path 排序累计百分比上限, [最小颜色 id, 最大颜色 id]]；下限由上一段上限自动推导。 */
 export type BlockColorRule = readonly [number, readonly [BallColor, BallColor]];
@@ -28,13 +24,10 @@ export enum ColorBlockType {
 
 export interface LevelDef {
     levelId: number;
-    name: string;
-    /** JSON 中稳定的关卡网格标识，便于日志和未来工具定位。 */
-    gridId: string;
-    /** ColorBlock 网格，按从上到下的行顺序保存。 */
+    /** 外部布局库中的稳定布局标识。 */
+    layout: string;
+    /** 从外部布局库解析出的 ColorBlock 网格，按从上到下的行顺序保存。 */
     grid: LevelGrid;
-    /** 唯一生成模式，当前固定为 guided。 */
-    mode: LevelGenerationMode;
     /** 按 ColorBlock path 升序后，依百分比分段指定可用颜色 id 范围。 */
     blockColor: BlockColorRule[];
     /** 随机种子；<=0 表示每次运行都不同 */
@@ -44,8 +37,6 @@ export interface LevelDef {
      * [] = 完全不扰乱；非空时合计必须为 1。
      */
     boxShuffleSegments: number[];
-    /** 预留：特殊规则开关。第一版一律为空数组。 */
-    specialRules: string[];
 }
 
 /** 数值编码：0=空位，1=普通，2=Unknown，3=ColorBlockBoxes。 */
@@ -61,18 +52,43 @@ export function isValidBlockType(cell: unknown): cell is ColorBlockType {
 
 let _levels: ReadonlyArray<LevelDef> = [];
 
-/** 安装 JsonAsset 中的完整关卡表；成功后 JSON 成为唯一运行时事实源。 */
-export function installLevelConfig(source: unknown): boolean {
-    if (!source || typeof source !== 'object') return false;
-    const raw = (source as { levels?: unknown }).levels;
+interface LevelRuleSource {
+    levels?: unknown;
+}
+
+interface ExternalLayout {
+    levelId?: unknown;
+    grid?: unknown;
+}
+
+/** 安装规则表与外部布局库；成功后合并为运行时 LevelDef。 */
+export function installLevelConfig(ruleSource: unknown, layoutSource: unknown): boolean {
+    if (!ruleSource || typeof ruleSource !== 'object' || !Array.isArray(layoutSource)) return false;
+    const source = ruleSource as LevelRuleSource;
+    const raw = source.levels;
     if (!Array.isArray(raw) || raw.length === 0) return false;
 
+    const layouts = new Map<string, LevelGrid>();
+    for (const item of layoutSource as ExternalLayout[]) {
+        if (!item || typeof item !== 'object' || typeof item.levelId !== 'string' || !Array.isArray(item.grid)) {
+            continue;
+        }
+        // 布局库可能包含重复实验记录；配置引用时固定采用第一条，保证结果稳定。
+        if (!layouts.has(item.levelId)) layouts.set(item.levelId, item.grid as LevelGrid);
+    }
+
     const parsed: LevelDef[] = [];
-    for (const item of raw) {
+    for (let i = 0; i < raw.length; i++) {
+        const item = raw[i];
         if (!item || typeof item !== 'object') return false;
-        const def = item as LevelDef;
-        if (!Number.isInteger(def.levelId) || !Array.isArray(def.grid)) return false;
-        parsed.push(def);
+        const rule = item as Omit<LevelDef, 'grid'>;
+        if (!Number.isInteger(rule.levelId) || typeof rule.layout !== 'string') return false;
+        const grid = layouts.get(rule.layout);
+        if (!grid) {
+            console.error(`[LevelConfig] 布局库中找不到 levels[${i}].layout="${rule.layout}"。`);
+            return false;
+        }
+        parsed.push({ ...rule, grid });
     }
     parsed.sort((a, b) => a.levelId - b.levelId);
     _levels = parsed;

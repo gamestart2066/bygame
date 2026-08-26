@@ -1,6 +1,6 @@
 import { BallColor, CFG } from '../core/GameTypes';
 import {
-    ColorBlockType, isValidBlockType, isValidColor, LevelGenerationMode,
+    ColorBlockType, isValidBlockType, isValidColor,
     LevelDef, LevelGrid, LevelPlan,
 } from './LevelConfig';
 
@@ -64,11 +64,8 @@ export class LevelValidator {
         return { ok: errors.length === 0, errors, warnings };
     }
 
-    /** guided 模式、path 配色区间与收纳箱分段扰乱配置。 */
+    /** path 配色区间与收纳箱分段扰乱配置。 */
     private static checkGenerationConfig(def: LevelDef, errors: string[]): void {
-        if (def.mode !== LevelGenerationMode.Guided) {
-            errors.push(`关卡生成模式只支持 guided，当前为 ${String(def.mode)}。`);
-        }
         if (!Array.isArray(def.blockColor) || def.blockColor.length === 0) {
             errors.push('blockColor 必须是非空数组。');
         } else {
@@ -109,15 +106,15 @@ export class LevelValidator {
         }
     }
 
-    /** 网格最多 7 列；空位位置不限，所有非空节点必须四方向连通。 */
+    /** 外部布局网格最多 8 列；空位位置不限，所有非空节点必须四方向连通。 */
     private static checkGrid(def: LevelDef, grid: LevelGrid, errors: string[]): void {
         if (!Array.isArray(grid) || grid.length === 0) {
-            errors.push(`ColorBlock 网格 ${def.gridId} 不能为空。`);
+            errors.push(`ColorBlock 布局 ${def.layout} 不能为空。`);
             return;
         }
         const columns = grid[0]?.length ?? 0;
-        if (columns <= 0 || columns > 7) {
-            errors.push(`ColorBlock 网格列数必须为 1～7，当前为 ${columns}。`);
+        if (columns <= 0 || columns > 8) {
+            errors.push(`ColorBlock 网格列数必须为 1～8，当前为 ${columns}。`);
             return;
         }
 

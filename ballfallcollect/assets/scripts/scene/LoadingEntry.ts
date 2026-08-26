@@ -57,8 +57,9 @@ export class LoadingEntry extends Component {
     /** 1. 基础系统初始化 */
     private initSystems(): void {
         const config = ResManager.getCached<JsonAsset>(ResPaths.levelGrids);
-        if (!config || !installLevelConfig(config.json)) {
-            console.error('[LoadingEntry] LevelGrids.json 缺少合法的 levels 数组。');
+        const layouts = ResManager.getCached<JsonAsset>(ResPaths.levelLayouts);
+        if (!config || !layouts || !installLevelConfig(config.json, layouts.json)) {
+            console.error('[LoadingEntry] 关卡规则表或布局库缺失/不合法。');
         }
         LevelManager.init();
     }
@@ -89,6 +90,7 @@ export class LoadingEntry extends Component {
         items.push({ path: ResPaths.prefab(PrefabNames.VSlot), type: Prefab });
         items.push({ path: ResPaths.prefab(PrefabNames.CollectBox), type: Prefab });
         items.push({ path: ResPaths.levelGrids, type: JsonAsset });
+        items.push({ path: ResPaths.levelLayouts, type: JsonAsset });
 
         // UI 面板预制体：可选（play/ui 目录尚未创建，缺失时 UIManager 用代码兜底）
         for (const key of Object.keys(UIPrefabs) as Array<keyof typeof UIPrefabs>) {

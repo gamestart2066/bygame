@@ -5,7 +5,7 @@ import { VSlot } from './VSlot';
 const { ccclass, property } = _decorator;
 
 /**
- * 旧 Terrain Prefab 兼容组件。正式关卡现由 LevelGrids.json + VSlot/ColorBlock Prefab 生成，
+ * 旧 Terrain Prefab 兼容组件。正式关卡现由外部布局 JSON + VSlot/ColorBlock Prefab 生成，
  * GameManager 不再读取本组件；暂时保留文件，避免破坏旧资源引用。
  *
  * ============ Terrain Prefab 约定 ============

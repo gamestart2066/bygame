@@ -60,6 +60,8 @@ export class GameManager extends Component {
     private _boxes: CollectBox[] = [];
     /** 真正的队列结构：每列一个独立数组 */
     private _columns: CollectBox[][] = [];
+    /** VSlot 根节点世界坐标转换到 BoxLayer 后的布局基准。 */
+    private _boxLayoutBase: Vec3 = new Vec3();
     private _track: TrackSystem | null = null;
     private _balls: Ball[] = [];
     private _ballPool: BallPool = new BallPool();
@@ -110,8 +112,9 @@ export class GameManager extends Component {
      */
     public async startLevel(): Promise<boolean> {
         const gridAsset = await ResManager.load(ResPaths.levelGrids, JsonAsset);
-        if (!gridAsset || !installLevelConfig(gridAsset.json)) {
-            console.error('[GameManager] LevelGrids.json 加载或解析失败，无法开始。');
+        const layoutAsset = await ResManager.load(ResPaths.levelLayouts, JsonAsset);
+        if (!gridAsset || !layoutAsset || !installLevelConfig(gridAsset.json, layoutAsset.json)) {
+            console.error('[GameManager] 关卡规则表或布局库加载/解析失败，无法开始。');
             return false;
         }
         const def = LevelManager.getCurrentDef();
@@ -153,7 +156,7 @@ export class GameManager extends Component {
         if (!this._collectBoxPrefab || !this._colorBlockPrefab || !this._vslotPrefab || !grid ||
             (needsBlockBoxes && !this._colorBlockBoxesPrefab)) {
             const errors = [
-                `必需 Prefab 或网格 ${def.gridId} 加载失败，关卡已阻止启动。`,
+                `必需 Prefab 或布局 ${def.layout} 加载失败，关卡已阻止启动。`,
             ];
             EventBus.emit(GameEvent.LevelValidateFailed, { levelId: def.levelId, errors });
             return false;
@@ -161,14 +164,16 @@ export class GameManager extends Component {
         const gridErrors = LevelValidator.validateGrid(def, grid);
         if (gridErrors.length > 0) {
             EventBus.emit(GameEvent.LevelValidateFailed, { levelId: def.levelId, errors: gridErrors });
-            console.error(`[GameManager] JSON 网格 ${def.gridId} 校验失败，已阻止生成。`);
+            console.error(`[GameManager] JSON 布局 ${def.layout} 校验失败，已阻止生成。`);
             return false;
         }
 
         // 1. 先实例化共用 VSlot，再以其中 Startgridpos 为底部中心生成配置网格。
         const terrainInfo = this.buildConfiguredTerrain(def, grid);
         if (!terrainInfo) {
-            const errors = ['VSlot / Startgridpos / ColorBlock 网格生成失败，关卡已阻止启动。'];
+            const errors = [
+                'VSlot / Startgridpos / BoxCollectPos / ColorBlock 网格生成失败，关卡已阻止启动。',
+            ];
             EventBus.emit(GameEvent.LevelValidateFailed, { levelId: def.levelId, errors });
             return false;
         }
@@ -257,14 +262,25 @@ export class GameManager extends Component {
     /** 由 JSON 网格生成本关唯一 VSlot、ColorBlock 与 Boxes。 */
     private buildConfiguredTerrain(def: LevelDef, grid: LevelGrid): TerrainInfo | null {
         if (!this._terrainLayer || !this._vslotPrefab || !this._colorBlockPrefab) return null;
+        const canvasUI = this.getComponent(UITransform);
+        if (!canvasUI) {
+            console.error('[GameManager] Canvas 缺少 UITransform，无法计算 VSlot 屏幕底边坐标。');
+            return null;
+        }
 
         const vslotNode = instantiate(this._vslotPrefab);
         vslotNode.setParent(this._terrainLayer);
-        vslotNode.setPosition(0, 0, 0);
+        // VSlot 根节点是整个槽体的屏幕底部基准。不能沿用 Prefab 保存时的位置，
+        // 也不能写死设计分辨率；按当前 Canvas 实际高度动态贴齐底边。
+        const screenBottomY = -canvasUI.contentSize.height / 2;
+        vslotNode.setPosition(0, screenBottomY, 0);
         const vslot = vslotNode.getComponent(VSlot);
         const gridStart = vslot?.getGridStart() ?? null;
-        if (!vslot || !gridStart) {
-            console.error('[GameManager] VSlot.prefab 必须挂 VSlot，并包含 Startgridpos 子节点。');
+        const boxCollectPos = vslot?.getBoxCollectPos() ?? null;
+        if (!vslot || !gridStart || !boxCollectPos) {
+            console.error(
+                '[GameManager] VSlot.prefab 必须挂 VSlot，并包含 Startgridpos / BoxCollectPos 子节点。'
+            );
             vslotNode.destroy();
             return null;
         }
@@ -552,7 +568,18 @@ export class GameManager extends Component {
     // ==================== 收纳箱：固定列 + 列内补位 ====================
 
     private createBoxes(columns: BallColor[][]): boolean {
-        if (!this._collectBoxPrefab) return false;
+        if (!this._collectBoxPrefab || !this._vslot || !this._boxLayer) return false;
+        const boxLayerUI = this._boxLayer.getComponent(UITransform);
+        if (!boxLayerUI) {
+            console.error('[GameManager] BoxLayer 缺少 UITransform，无法对齐 VSlot 基准。');
+            return false;
+        }
+        const boxCollectPos = this._vslot.getBoxCollectPos();
+        if (!boxCollectPos) {
+            console.error('[GameManager] VSlot 缺少 BoxCollectPos，无法创建 CollectBox。');
+            return false;
+        }
+        this._boxLayoutBase = boxLayerUI.convertToNodeSpaceAR(boxCollectPos.worldPosition);
         const colCount = Math.max(1, CFG.boxColumnCount);
         this._columns = [];
         for (let c = 0; c < colCount; c++) this._columns.push([]);
@@ -565,7 +592,7 @@ export class GameManager extends Component {
                     this._collectBoxPrefab,
                     colors[row], seq++,
                     new Vec3(this.columnX(c), this.rowY(row), 0),
-                    this._boxLayer ?? this.node,
+                    this._boxLayer,
                     (b) => this.onBoxFinished(b)
                 );
                 if (!box) return false;
@@ -583,11 +610,11 @@ export class GameManager extends Component {
         const colCount = Math.max(1, CFG.boxColumnCount);
         const step = CFG.boxColumnSpacing;
         const total = step * (colCount - 1);
-        return -total / 2 + col * step;
+        return this._boxLayoutBase.x - total / 2 + col * step;
     }
 
     private rowY(row: number): number {
-        return CFG.boxY - row * CFG.boxRowSpacing;
+        return this._boxLayoutBase.y - row * CFG.boxRowSpacing;
     }
 
     /** 刷新单独一列：列内向上补位（只改 Y）+ 可收状态 + 可见性 */

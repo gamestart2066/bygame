@@ -12,7 +12,7 @@ const { ccclass, property } = _decorator;
  * 顶部彩色格子。
  *
  * 职责边界（重要）：
- * - 节点大小来自 Prefab；数量与网格位置由 LevelGrids.json + Startgridpos 在运行时生成
+ * - 节点大小来自 Prefab；数量与网格位置由外部布局库 + Startgridpos 在运行时生成
  * - 颜色由 GameManager 在运行时通过 setup() 分配（用户无需在编辑器配色）
  * - 每个格子固定产出 CFG.ballsPerBlock（9）个同色球
  *
