@@ -68,6 +68,7 @@ export class GameManager extends Component {
     private _collectBoxPrefab: Prefab | null = null;
     private _colorBlockPrefab: Prefab | null = null;
     private _colorBlockBoxesPrefab: Prefab | null = null;
+    private _rectPrefab: Prefab | null = null;
     private _vslotPrefab: Prefab | null = null;
 
     private _terrainLayer: Node | null = null;
@@ -83,6 +84,10 @@ export class GameManager extends Component {
     private _allBlocksSpeedBoosted: boolean = false;
     /** 已点击批次中尚未被轨道接收的小球数，包含尚在 Slot 前置动画中的预占数量。 */
     private _untrackedBallCount: number = 0;
+    /** EntranceGate 附近低速堆积的持续时间与扰动冷却。 */
+    private _entranceJamTime: number = 0;
+    private _entranceJamCooldown: number = 0;
+    private _entranceJamDirection: number = 1;
     private _startTime: number = 0;
 
     /** 入口捕获区中心（取自 EntranceGate） */
@@ -148,12 +153,16 @@ export class GameManager extends Component {
         this._colorBlockBoxesPrefab = await ResManager.load(
             ResPaths.prefab(PrefabNames.ColorBlockBoxes), Prefab
         );
+        this._rectPrefab = await ResManager.load(
+            ResPaths.prefab(PrefabNames.Rect), Prefab
+        );
         this._vslotPrefab = await ResManager.load(
             ResPaths.prefab(PrefabNames.VSlot), Prefab
         );
         const grid = def.grid;
         const needsBlockBoxes = grid.some((row) => row.includes(ColorBlockType.Boxes));
-        if (!this._collectBoxPrefab || !this._colorBlockPrefab || !this._vslotPrefab || !grid ||
+        if (!this._collectBoxPrefab || !this._colorBlockPrefab || !this._rectPrefab ||
+            !this._vslotPrefab || !grid ||
             (needsBlockBoxes && !this._colorBlockBoxesPrefab)) {
             const errors = [
                 `必需 Prefab 或布局 ${def.layout} 加载失败，关卡已阻止启动。`,
@@ -202,6 +211,9 @@ export class GameManager extends Component {
 
         this.setupBlocks(plan);
         this._untrackedBallCount = 0;
+        this._entranceJamTime = 0;
+        this._entranceJamCooldown = 0;
+        this._entranceJamDirection = 1;
         this._allBlocksSpeedBoosted = false;
         if (!this.createBoxes(plan.boxColumns)) {
             const errors = ['CollectBox.prefab 结构或脚本配置错误，关卡已阻止启动。'];
@@ -367,8 +379,14 @@ export class GameManager extends Component {
         const sampleUI = blocks[0].node.getComponent(UITransform)!;
         const blockWidth = sampleUI.contentSize.width || CFG.blockWidth;
         const blockHeight = sampleUI.contentSize.height || CFG.blockHeight;
-        const rows = grid.length;
-        const columns = grid[0].length;
+        const rows = CFG.colorBlockGridRows;
+        const columns = CFG.colorBlockGridColumns;
+        const sourceRows = grid.length;
+        const sourceColumns = grid[0].length;
+        const rowOffset = rows - sourceRows;
+        // LevelValidator 强制源布局为奇数列，因此该偏移必然是整数，
+        // ColorBlock 中心列与 7 列可视网格 / Startgridpos 严格对齐。
+        const colOffset = (columns - sourceColumns) / 2;
         const stepX = blockWidth + CFG.colorBlockGridGap;
         const stepY = blockHeight + CFG.colorBlockGridGap;
         const gridWidth = blockWidth + Math.max(0, columns - 1) * stepX;
@@ -385,20 +403,34 @@ export class GameManager extends Component {
             : gridStart.position.clone();
         gridRoot.setPosition(startLocal);
 
+        if (!this.createEmptyGridRects(
+            gridRoot, grid, rowOffset, colOffset,
+            rows, columns, blockWidth, blockHeight, stepX, stepY, gridWidth,
+        )) {
+            gridRoot.destroy();
+            vslotNode.destroy();
+            cleanupGridItems();
+            return null;
+        }
+
         for (const item of blocks) {
+            const visualRow = rowOffset + (item.staged ? item.row - 1 : item.row);
+            const visualCol = colOffset + item.col;
             item.node.setParent(gridRoot);
             item.node.setPosition(
-                -gridWidth / 2 + blockWidth / 2 + item.col * stepX,
-                blockHeight / 2 + (rows - 1 - (item.staged ? item.row - 1 : item.row)) * stepY,
+                -gridWidth / 2 + blockWidth / 2 + visualCol * stepX,
+                blockHeight / 2 + (rows - 1 - visualRow) * stepY,
                 0,
             );
             item.node.active = !item.staged;
         }
         for (const item of blockBoxes) {
+            const visualRow = rowOffset + item.row;
+            const visualCol = colOffset + item.col;
             item.node.setParent(gridRoot);
             item.node.setPosition(
-                -gridWidth / 2 + blockWidth / 2 + item.col * stepX,
-                blockHeight / 2 + (rows - 1 - item.row) * stepY,
+                -gridWidth / 2 + blockWidth / 2 + visualCol * stepX,
+                blockHeight / 2 + (rows - 1 - visualRow) * stepY,
                 0,
             );
         }
@@ -431,6 +463,75 @@ export class GameManager extends Component {
             hasVSlot: true,
             hasEntranceGate: !!vslot.getEntranceGate(),
         };
+    }
+
+    /**
+     * 固定 7×7 内每个空单元使用一个 rect，并按四边邻居独立计算边界：
+     * rect↔rect 延伸到共同中线保持无缝；rect↔ColorBlock/Boxes 仅缩进该边保留 gridGap。
+     */
+    private createEmptyGridRects(
+        parent: Node,
+        grid: LevelGrid,
+        rowOffset: number,
+        colOffset: number,
+        rows: number,
+        columns: number,
+        blockWidth: number,
+        blockHeight: number,
+        stepX: number,
+        stepY: number,
+        gridWidth: number,
+    ): boolean {
+        if (!this._rectPrefab) return false;
+        const occupied = Array.from({ length: rows }, () => new Array(columns).fill(false));
+        for (let row = 0; row < grid.length; row++) {
+            for (let col = 0; col < grid[row].length; col++) {
+                if (grid[row][col] === ColorBlockType.Empty) continue;
+                occupied[rowOffset + row][colOffset + col] = true;
+            }
+        }
+
+        const layer = new Node('RectFillLayer');
+        layer.addComponent(UITransform);
+        layer.setParent(parent);
+        layer.setPosition(0, 0, 0);
+
+        const gapX = Math.max(0, stepX - blockWidth);
+        const gapY = Math.max(0, stepY - blockHeight);
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < columns; col++) {
+                if (occupied[row][col]) continue;
+
+                const node = instantiate(this._rectPrefab);
+                const ui = node.getComponent(UITransform);
+                if (!ui || ui.contentSize.width <= 0 || ui.contentSize.height <= 0) {
+                    console.error('[GameManager] rect.prefab 根节点必须包含有效 UITransform。');
+                    node.destroy();
+                    layer.destroy();
+                    return false;
+                }
+                const leftInset = col > 0 && occupied[row][col - 1] ? gapX / 2 : 0;
+                const rightInset = col + 1 < columns && occupied[row][col + 1] ? gapX / 2 : 0;
+                const topInset = row > 0 && occupied[row - 1][col] ? gapY / 2 : 0;
+                const bottomInset = row + 1 < rows && occupied[row + 1][col] ? gapY / 2 : 0;
+                const targetWidth = stepX - leftInset - rightInset;
+                const targetHeight = stepY - topInset - bottomInset;
+                const centerOffsetX = (leftInset - rightInset) / 2;
+                const centerOffsetY = (bottomInset - topInset) / 2;
+                node.setParent(layer);
+                node.setPosition(
+                    -gridWidth / 2 + blockWidth / 2 + col * stepX + centerOffsetX,
+                    blockHeight / 2 + (rows - 1 - row) * stepY + centerOffsetY,
+                    0,
+                );
+                node.setScale(
+                    targetWidth / ui.contentSize.width,
+                    targetHeight / ui.contentSize.height,
+                    1,
+                );
+            }
+        }
+        return true;
     }
 
     /**
@@ -697,7 +798,7 @@ export class GameManager extends Component {
 
         this.pruneBalls();
         this.updateAllBlocksSpeedBoost();
-        this.handleEntry();
+        this.handleEntry(dt);
         this.handleCollect();
         this.checkResult(dt);
     }
@@ -715,8 +816,9 @@ export class GameManager extends Component {
     }
 
     /** 入轨：捕获区内按先到先入，每帧最多放行一个 */
-    private handleEntry(): void {
+    private handleEntry(dt: number): void {
         if (!this._track) return;
+        this._entranceJamCooldown = Math.max(0, this._entranceJamCooldown - dt);
 
         const waiting: Ball[] = [];
         for (const ball of this._balls) {
@@ -729,13 +831,60 @@ export class GameManager extends Component {
             }
             waiting.push(ball);
         }
-        if (waiting.length === 0) return;
-
         waiting.sort((a, b) => a.waitTicket - b.waitTicket);
-        if (this._track.tryAccept(waiting[0], this._trackBallLayer)) {
+        if (waiting.length > 0 && this._track.tryAccept(waiting[0], this._trackBallLayer)) {
             this.releaseUntrackedReservation();
             this.emitProgress();
+            this._entranceJamTime = 0;
+        } else {
+            this.updateEntranceAntiJam(dt);
         }
+    }
+
+    /**
+     * 只在轨道有入口空槽、Gate 上方至少两球长时间低速时轻推少量球，
+     * 打破 V 槽出口对冲形成的稳定力链。不占用槽位，不改 BallState。
+     */
+    private updateEntranceAntiJam(dt: number): void {
+        if (!this._track) return;
+
+        // 没有经过入口的空槽时属于正常轨道等待，不是物理卡死。
+        if (this._track.findEntrySlot() < 0) {
+            this._entranceJamTime = 0;
+            return;
+        }
+
+        const halfWidth = CFG.entryZoneWidth / 2;
+        const minY = this._entryCenter.y;
+        const maxY = minY + CFG.entranceAntiJamZoneHeight;
+        const speedLimitSq = CFG.entranceAntiJamLowSpeed * CFG.entranceAntiJamLowSpeed;
+        const stalled = this._balls.filter((ball) => {
+            if (!ball.isWaitable()) return false;
+            const p = ball.node.position;
+            return Math.abs(p.x - this._entryCenter.x) <= halfWidth
+                && p.y >= minY && p.y <= maxY
+                && ball.getPhysicsSpeedSquared() <= speedLimitSq;
+        });
+
+        if (stalled.length < CFG.entranceAntiJamMinBalls) {
+            this._entranceJamTime = 0;
+            return;
+        }
+
+        this._entranceJamTime += dt;
+        if (this._entranceJamTime < CFG.entranceAntiJamDelay || this._entranceJamCooldown > 0) return;
+
+        stalled.sort((a, b) => a.node.position.y - b.node.position.y);
+        const count = Math.min(CFG.entranceAntiJamMaxBalls, stalled.length);
+        const pushX = CFG.entranceAntiJamVelocityX * this._entranceJamDirection;
+        for (let i = 0; i < count; i++) {
+            // 两球时予以略微不同的竖直增量，避免平移后又恢复对称力链。
+            stalled[i].addAntiJamVelocity(pushX, CFG.entranceAntiJamVelocityY + i * 6);
+        }
+        this._entranceJamDirection *= -1;
+        this._entranceJamTime = 0;
+        this._entranceJamCooldown = CFG.entranceAntiJamCooldown;
+        EventBus.emit(GameEvent.Subtitle, { text: '（开发信息)debug扰乱' });
     }
 
     private releaseUntrackedReservation(): void {

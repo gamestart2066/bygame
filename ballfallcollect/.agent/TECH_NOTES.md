@@ -100,7 +100,7 @@ Game (cc.Scene)
 | 谁负责 | 内容 |
 |---|---|
 | **用户（编辑器）** | VSlot/EntranceGate/Startgridpos/BoxCollectPos 的位置与尺寸、ColorBlock Prefab 尺寸、UI、美术 |
-| **all_levels_simple_edited.json** | 外部 ColorBlock 布局库；当前可引用布局为 7 行、最多 8 列 |
+| **all_levels_simple_edited.json** | 外部 ColorBlock 布局库；正式关卡只引用最大 7×7 且列数为奇数的合法布局 |
 | **LevelGrids.json** | 1000 关规则：每条记录直接包含 `layout`、`blockColor`、seed、`boxShuffleSegments`；不保存 grid/name/mode/specialRules，也不维护并行布局数组 |
 | **LevelDef** | JSON 安装后的只读运行时结构；不再维护硬编码 `LEVELS` 数组 |
 | **代码** | 实例化 VSlot → 从 Startgridpos 生成网格 → 分配颜色 → 物理 → 轨道 → 收纳箱 → 胜负 |
@@ -113,7 +113,7 @@ Game (cc.Scene)
 #### 🚫 架构红线（违反即回退）
 
 **禁止**在 `GameManager` / `StaticBuilder` 中散写格子或 VSlot 的绝对坐标。
-ColorBlock 数量和网格形状只能来自 `play/config/all_levels_simple_edited.json`，游戏关卡通过自身 `layout` 字段直接选取布局，网格最多 8 列；VSlot 空间基准只能来自 Prefab。
+ColorBlock 数量和网格形状只能来自 `play/config/all_levels_simple_edited.json`，游戏关卡通过自身 `layout` 字段直接选取布局，正式布局最大 7×7；VSlot 空间基准只能来自 Prefab。
 
 > 配置只描述规则化网格，不替代 Prefab 空间基准；不要重新引入每关独立 Terrain Prefab 或散落坐标。
 
@@ -178,6 +178,7 @@ SystemStatic(墙) → Track → BoxLayer → BallLayer(下落/等待) → TrackB
 | BallPool 预热 | `GameManager.startLevel()` 在 Playing 前按 `CFG.ballPoolPrewarmCount` 实例化并 reset（当前 18） | 首次点击不集中 instantiate；不足时仍可安全扩容 |
 | 轨道两段速度 | `CFG.trackSpeed` 是关卡基础速度；全部 ColorBlock 至少点击一次后使用 `trackAllBlocksClickedMultiplier`（当前 2） | 运行时倍率只属于本关，不回写 CFG、不污染 Restart/下一关 |
 | 轨道外球上限 | 点击时整批预占 `ballsPerBlock`，轨道 `tryAccept` 成功后逐球释放；上限=`ballsPerBlock × maxUntrackedBallBatches`（当前 36） | 不能只数已 instantiate 的球，否则快速连点会在 Slot Tween 期间突破上限 |
+| EntranceGate 物理防卡死 | 只有轨道存在入口空槽，且 Gate 上方至少 `entranceAntiJamMinBalls` 颗球连续低速达到 `entranceAntiJamDelay` 时，才对最低的少量球叠加交替方向速度 | 不改 BallState/槽位/入轨判定；正常等待轨道槽位时不触发，参数统一在 `CFG` |
 | 入口**每帧最多放行 1 球** | `handleEntry` 只处理队首 | 防止同帧多球抢占同一槽位 |
 | 槽位**立即占位** | `tryAccept` 先写 `_slots[i]` 再播吸附动画 | 动画期间槽位不能被再次分配 |
 | 轨道球连续补位 | 按入轨顺序以首球为头，后球沿轨道以 `trackCatchUpSpeedMultiplier` 逐槽追赶；目标槽先预留，真正到位后才转移 `_slots` 所有权 | 禁止瞬间压紧数组或跨越已占槽；追赶途中仍保持 OnTrack，可正常收纳，收纳时必须释放目标预留 |
@@ -211,6 +212,7 @@ VSlot [VSlot]
 └─ BoxCollectPos    ← CollectBox 第一行中心；不得挂 StaticPlate
 
 ColorBlockGrid [UITransform anchor=(0.5,0)]  ← 运行时节点
+├─ RectFillLayer ← 7×7 内每个空白单元实例化 rect.prefab，四边按邻居类型独立缩进
 └─ ColorBlock × 当前关卡 layout ID 对应的非空类型单元
 ```
 
@@ -227,7 +229,7 @@ ColorBlockGrid [UITransform anchor=(0.5,0)]  ← 运行时节点
 - `CFG.debugShowColorBlockPath` 默认关闭；临时开启后运行时显示带黑色描边的 `P1/P2/...`，不得依赖该调试节点承载玩法逻辑
 - 收纳箱 `flat` 必须按 path 排序后的 `blockColors` 从后向前展开（每格重复 `ballsPerBlock/boxCapacity` 次），再依 `boxShuffleSegments` 分段洗牌。段顺序不得交叉，同一 seed 必须可复现
 - ColorBlock 耗尽回调由 `GameManager.onColorBlockDepleted()` 统一调用 `playDepleteAndHide()`：根节点缩小后隐藏，normal/unknown/boxes 派发格子不得分叉保留 Background
-- 外部布局所有行等长、最多 8 列；空位可位于任意位置，但所有非空节点必须通过上下左右相邻形成一个连通块，最底行至少有一个 normal ColorBlock
+- 外部布局所有行等长、最大 7×7 且列数必须为奇数，保证中心列与固定 7 列可视网格 / Startgridpos 对齐；小布局在固定 7×7 中底部对齐、水平居中，布局内 `0` 与外围补齐空位每格实例化 `rect.prefab`；rect 邻边为空白时延伸到公共中线无缝连接，邻边为 ColorBlock/Boxes 时仅该边缩进以保留 `colorBlockGridGap`；所有非空节点必须通过上下左右相邻形成一个连通块，最底行至少有一个 normal ColorBlock
 - GameManager 保存生成格子的 row/col，并建立四方向邻接索引。只有全局最底行初始解锁；格子成功开始释放时解锁上/下/左/右邻居
 - `ColorBlock.prefab/Lid(Sprite)` 是锁定遮罩：setup 时赋予本格颜色，锁定显示、解锁隐藏；禁止运行时动态创建 Lid
 - 解锁表现使用两个并行 Tween：ColorBlock 根节点按 `CFG.colorBlockUnlockPulseScale/Duration` 脉冲，Lid 按 `colorBlockLidHideDuration` 缩小后隐藏；结束/取消时必须恢复两者 Prefab 基准 scale

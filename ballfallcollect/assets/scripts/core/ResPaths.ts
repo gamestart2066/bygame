@@ -42,6 +42,7 @@ export const PrefabNames = {
     Ball: 'Ball',
     ColorBlock: 'ColorBlock',
     ColorBlockBoxes: 'ColorBlockBoxes',
+    Rect: 'rect',
     VSlot: 'VSlot',
     CollectBox: 'CollectBox',
 } as const;

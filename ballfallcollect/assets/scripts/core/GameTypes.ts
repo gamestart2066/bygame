@@ -86,6 +86,9 @@ export const CFG = {
      */
     blockWidth: 190,
     blockHeight: 190,
+    /** ColorBlock 可视布局固定上限；不足的单元由 rect 背景补齐。 */
+    colorBlockGridRows: 7,
+    colorBlockGridColumns: 7,
     /** ColorBlock 配置网格中相邻节点的边缘间距 */
     colorBlockGridGap: 10,
     /** 临时调试：在 ColorBlock 上显示最短解锁 path；正式运行默认关闭 */
@@ -160,6 +163,15 @@ export const CFG = {
     /** 入口捕获区尺寸；中心运行时取 EntranceGate 位置 */
     entryZoneWidth: 170,
     entryZoneHeight: 90,
+    /** EntranceGate 上方物理球稳定对冲时的防卡死扰动。 */
+    entranceAntiJamDelay: 0.8,
+    entranceAntiJamCooldown: 0.6,
+    entranceAntiJamZoneHeight: 180,
+    entranceAntiJamLowSpeed: 12,
+    entranceAntiJamMinBalls: 2,
+    entranceAntiJamMaxBalls: 2,
+    entranceAntiJamVelocityX: 42,
+    entranceAntiJamVelocityY: 30,
     /** 空槽与入口的**弧长**容差（像素）内才允许吸附 */
     entryArcTolerance: 34,
     /** 跳入轨道的总动画时长与上抬高度 */

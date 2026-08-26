@@ -106,16 +106,29 @@ export class LevelValidator {
         }
     }
 
-    /** 外部布局网格最多 8 列；空位位置不限，所有非空节点必须四方向连通。 */
+    /** 外部布局最多 7×7；空位位置不限，所有非空节点必须四方向连通。 */
     private static checkGrid(def: LevelDef, grid: LevelGrid, errors: string[]): void {
         if (!Array.isArray(grid) || grid.length === 0) {
             errors.push(`ColorBlock 布局 ${def.layout} 不能为空。`);
             return;
         }
         const columns = grid[0]?.length ?? 0;
-        if (columns <= 0 || columns > 8) {
-            errors.push(`ColorBlock 网格列数必须为 1～8，当前为 ${columns}。`);
+        if (grid.length > CFG.colorBlockGridRows) {
+            errors.push(
+                `ColorBlock 网格行数必须为 1～${CFG.colorBlockGridRows}，当前为 ${grid.length}。`
+            );
+        }
+        if (columns <= 0 || columns > CFG.colorBlockGridColumns) {
+            errors.push(
+                `ColorBlock 网格列数必须为 1～${CFG.colorBlockGridColumns}，当前为 ${columns}。`
+            );
             return;
+        }
+        if (columns % 2 === 0) {
+            errors.push(
+                `ColorBlock 网格列数必须为奇数，当前为 ${columns}；` +
+                '偶数列无法与固定 7 列可视网格的中心列对齐。'
+            );
         }
 
         for (let rowIndex = 0; rowIndex < grid.length; rowIndex++) {

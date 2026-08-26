@@ -245,6 +245,20 @@ export class Ball extends Component {
             && (this.state === BallState.Falling || this.state === BallState.Waiting);
     }
 
+    /** 仅供 EntranceGate 防卡死检测：返回当前线速度平方。 */
+    public getPhysicsSpeedSquared(): number {
+        if (this._recycled || !this._rb?.enabled) return Number.POSITIVE_INFINITY;
+        const v = this._rb.linearVelocity;
+        return v.x * v.x + v.y * v.y;
+    }
+
+    /** 打破 V 槽出口的稳定力链；不改变 Ball 状态与入轨逻辑。 */
+    public addAntiJamVelocity(deltaX: number, deltaY: number): void {
+        if (this._recycled || !this.isWaitable() || !this._rb?.enabled) return;
+        const v = this._rb.linearVelocity;
+        this._rb.linearVelocity = new Vec2(v.x + deltaX, v.y + deltaY);
+    }
+
     public get isRecycled(): boolean {
         return this._recycled;
     }

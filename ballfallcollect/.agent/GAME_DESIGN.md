@@ -46,7 +46,7 @@
 
 - 顶部若干**单色**格子，每格含 **9 个**同色小球
 - 每个格子下方各有一个 V 型槽（一一对应）
-- ColorBlock 真实类型网格来自 `play/config/all_levels_simple_edited.json`；`LevelGrids.json.levels` 每条记录以 `layout` 直接引用其中的字符串 `levelId`，并维护 path 配色、seed 与箱序难度。运行时以 `VSlot/Startgridpos` 为底部中心生成，布局最多 8 列
+- ColorBlock 真实类型网格来自 `play/config/all_levels_simple_edited.json`；`LevelGrids.json.levels` 每条记录以 `layout` 直接引用其中的字符串 `levelId`，并维护 path 配色、seed 与箱序难度。布局最大 7×7 且列数为奇数，运行时以 `VSlot/Startgridpos` 为底部中心生成固定 7×7 可视区，非 ColorBlock 空白单元使用 `rect.prefab`：相邻 rect 无缝连接，与 ColorBlock/Boxes 保留网格间距
 - 网格水平居中、向上展开；间距为 ColorBlock Prefab 实际节点尺寸 + `CFG.colorBlockGridGap`
 - 网格单元使用自然数类型码：`0=空位、1=normal、2=unknown、3=boxes`；代码中由 `ColorBlockType` 数值枚举统一解释
 - 空位可位于网格任意位置；所有非空节点必须上下左右连通，颜色由代码运行时分配

@@ -139,6 +139,6 @@ AI 看不到游戏画面：
 5. 删除文件必须用户明确点名，禁止为「清理」而删
 6. **🚫 禁止在代码中散写场景坐标**
    - V 槽、EntranceGate、Startgridpos、BoxCollectPos 等空间基准由用户在 Prefab 中摆放
-   - ColorBlock 是明确例外：数量、类型与空位来自 `play/config/all_levels_simple_edited.json`，每条 `LevelGrids.json.levels` 通过自身 `layout` 字段直接引用布局；单元使用自然数类型码（`0=空、1=normal、2=unknown、3=boxes`），空位位置不限但所有非空节点必须四方向连通，以 Startgridpos 为底部中心按 CFG 间距运行时生成
+   - ColorBlock 是明确例外：数量、类型与空位来自 `play/config/all_levels_simple_edited.json`，每条 `LevelGrids.json.levels` 通过自身 `layout` 字段直接引用布局；单元使用自然数类型码（`0=空、1=normal、2=unknown、3=boxes`），最大 7×7 且列数必须为奇数，空位位置不限但所有非空节点必须四方向连通，以 Startgridpos 为底部中心按 CFG 间距运行时生成；7×7 中每个空白单元实例化 `rect.prefab`，rect 之间无缝，与 ColorBlock/Boxes 之间保留网格间距
    - 网格之外的新布局仍优先采用「Prefab 实体 + 用户摆放/配置」，不得在 GameManager 散写坐标
    - 详见 `.agent/TECH_NOTES.md` 配置驱动地形架构
