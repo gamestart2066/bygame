@@ -144,7 +144,7 @@ export const CFG = {
     /** 两端圆角半径；**上下直线间距 = 2 × 此值**，越小越扁 */
     trackCornerRadius: 40,
     /** EntranceGate 与轨道上沿之间的垂直空隙；正值表示轨道位于 Gate 下方 */
-    trackEntryGap: 25,
+    trackEntryGap: 30,
     /** 找不到 EntranceGate 时的兜底入口位置（仅防止崩溃） */
     fallbackEntryX: 0,
     fallbackEntryY: 70,
@@ -163,6 +163,8 @@ export const CFG = {
     /** 入口捕获区尺寸；中心运行时取 EntranceGate 位置 */
     entryZoneWidth: 150,
     entryZoneHeight: 90,
+    /** 临时调试：画出正常入轨捕获区。 */
+    debugDrawTrackEntryZone: false,
     /** EntranceGate 上方物理球稳定对冲时的防卡死扰动。 */
     /** 临时调试：跳过逻辑入轨，保留 Gate 物理与防卡死检测。验证后改回 false。 */
     debugDisableTrackEntry: false,
@@ -175,7 +177,7 @@ export const CFG = {
     /** 低速条件短暂不足时缓慢衰减卡死计时，避免 Box2D 微抖导致瞬间清零。 */
     entranceAntiJamTimeDecayMultiplier: 2,
     entranceAntiJamMinBalls: 3,
-    entranceAntiJamMaxBalls: 1,
+    entranceAntiJamMaxBalls: 2,
     /** 一批（ballsPerBlock）真实物理球在 V 槽内时的基准扰动速度。 */
     entranceAntiJamVelocityX: 6,
     entranceAntiJamVelocityY: 5,

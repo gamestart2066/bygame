@@ -208,6 +208,7 @@ export class GameManager extends Component {
         // 必须手动下沉到 TerrainLayer 的位置，否则轨道图形会盖住球与箱子。
         const trackIndex = this._terrainLayer ? this._terrainLayer.getSiblingIndex() : 0;
         this._track.node.setSiblingIndex(trackIndex);
+        this.drawTrackEntryDebugZone();
         this.drawEntranceAntiJamDebugZone();
 
         this.setupBlocks(plan);
@@ -227,6 +228,27 @@ export class GameManager extends Component {
         EventBus.emit(GameEvent.LevelLoaded, { levelId: def.levelId });
         this.emitProgress();
         return true;
+    }
+
+    /** 临时可视化：与 inEntryZone 使用完全相同的中心与尺寸。 */
+    private drawTrackEntryDebugZone(): void {
+        if (!CFG.debugDrawTrackEntryZone) return;
+        const node = new Node('TrackEntryDebugZone');
+        node.addComponent(UITransform);
+        node.setParent(this.node);
+        node.setPosition(this._entryCenter);
+        const graphics = node.addComponent(Graphics);
+        graphics.lineWidth = 3;
+        graphics.strokeColor = new Color(40, 230, 255, 230);
+        graphics.fillColor = new Color(40, 230, 255, 38);
+        graphics.rect(
+            -CFG.entryZoneWidth / 2,
+            -CFG.entryZoneHeight / 2,
+            CFG.entryZoneWidth,
+            CFG.entryZoneHeight,
+        );
+        graphics.fill();
+        graphics.stroke();
     }
 
     /** 临时可视化：与 updateEntranceAntiJam 使用完全相同的空间边界。 */
