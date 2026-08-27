@@ -17,7 +17,8 @@ const { ccclass, property } = _decorator;
  *   VSlot                [UITransform, VSlot]
  *   ├─ PlateL            [UITransform, Sprite, (StaticPlate 可自动补)]
  *   ├─ PlateR            [UITransform, Sprite, (StaticPlate 可自动补)]
- *   ├─ EntranceGate      [UITransform, Sprite, (StaticPlate 可自动补)]
+ *   ├─ EntranceGate      [UITransform, Sprite]
+ *   │  └─ PhysicsBody  [UITransform, RigidBody2D(Static), BoxCollider2D]
  *   ├─ Startgridpos      [UITransform，仅作 ColorBlock 网格底部中心锚点]
  *   └─ BoxCollectPos     [UITransform，仅作 CollectBox 第一行中心基准]
  *
@@ -42,7 +43,9 @@ export class VSlot extends Component {
     /** 为每个子节点补上 StaticPlate，使其成为静态物理板 */
     private setupChildren(): void {
         for (const child of this.node.children) {
-            if (child.name === VSlot.GRID_START_NAME || child.name === VSlot.BOX_COLLECT_POS_NAME) {
+            if (child.name === VSlot.ENTRANCE_GATE_NAME
+                || child.name === VSlot.GRID_START_NAME
+                || child.name === VSlot.BOX_COLLECT_POS_NAME) {
                 continue;
             }
             if (!child.activeInHierarchy) continue;

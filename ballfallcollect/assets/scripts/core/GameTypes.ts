@@ -144,7 +144,7 @@ export const CFG = {
     /** 两端圆角半径；**上下直线间距 = 2 × 此值**，越小越扁 */
     trackCornerRadius: 40,
     /** EntranceGate 与轨道上沿之间的垂直空隙；正值表示轨道位于 Gate 下方 */
-    trackEntryGap: 12,
+    trackEntryGap: 25,
     /** 找不到 EntranceGate 时的兜底入口位置（仅防止崩溃） */
     fallbackEntryX: 0,
     fallbackEntryY: 70,
@@ -161,24 +161,24 @@ export const CFG = {
     /** 绘制轨道时的采样段数（与逻辑同用一套路径函数，保证一致） */
     trackDrawSegments: 96,
     /** 入口捕获区尺寸；中心运行时取 EntranceGate 位置 */
-    entryZoneWidth: 170,
+    entryZoneWidth: 150,
     entryZoneHeight: 90,
     /** EntranceGate 上方物理球稳定对冲时的防卡死扰动。 */
     /** 临时调试：跳过逻辑入轨，保留 Gate 物理与防卡死检测。验证后改回 false。 */
     debugDisableTrackEntry: false,
     /** 临时调试：画出 EntranceGate 上方的防卡死判定区域。 */
     debugDrawEntranceAntiJamZone: false,
-    entranceAntiJamDelay: 3,
-    entranceAntiJamCooldown: 5,
+    entranceAntiJamDelay: 4,
+    entranceAntiJamCooldown: 4,
     entranceAntiJamZoneHeight: 180,
     entranceAntiJamLowSpeed: 0.1,
     /** 低速条件短暂不足时缓慢衰减卡死计时，避免 Box2D 微抖导致瞬间清零。 */
-    entranceAntiJamTimeDecayMultiplier: 1,
+    entranceAntiJamTimeDecayMultiplier: 2,
     entranceAntiJamMinBalls: 3,
     entranceAntiJamMaxBalls: 1,
     /** 一批（ballsPerBlock）真实物理球在 V 槽内时的基准扰动速度。 */
-    entranceAntiJamVelocityX: 8,
-    entranceAntiJamVelocityY: 6,
+    entranceAntiJamVelocityX: 6,
+    entranceAntiJamVelocityY: 5,
     /** 空槽与入口的**弧长**容差（像素）内才允许吸附 */
     entryArcTolerance: 34,
     /** 跳入轨道的总动画时长与上抬高度 */

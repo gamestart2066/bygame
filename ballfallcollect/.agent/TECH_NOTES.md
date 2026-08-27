@@ -124,7 +124,7 @@ ColorBlock 数量和网格形状只能来自 `play/config/all_levels_simple_edit
 | 组件 | 挂在哪 | 作用 |
 |---|---|---|
 | `ColorBlock` | `ColorBlock.prefab` 根节点 | 按 JSON 网格实例化；颜色由 `setup()` 注入；点击释放 9 球 |
-| `VSlot` | `VSlot.prefab` 根节点 | 每关实例化 1 个；提供 EntranceGate、Startgridpos 与 BoxCollectPos；只为物理子板补挂 StaticPlate |
+| `VSlot` | `VSlot.prefab` 根节点 | 每关实例化 1 个；提供 EntranceGate、Startgridpos 与 BoxCollectPos；只为 PlateL/PlateR 等物理子板补挂 StaticPlate，EntranceGate 的物理由 Prefab 子节点承载 |
 | `StaticPlate` | 任意矩形节点 | 按 `UITransform` 尺寸自动生成静态刚体 + 盒碰撞体 |
 
 - ⚠️ `StaticPlate` 按 **contentSize** 建碰撞体：**改大小用 Content Size，不要用 Scale**
@@ -207,7 +207,8 @@ SystemStatic(墙) → Track → BoxLayer → BallLayer(下落/等待) → TrackB
 ```
 VSlot [VSlot]
 ├─ PlateL / PlateR
-├─ EntranceGate     ← 轨道入口与物理挡板
+├─ EntranceGate     ← 轨道入口参考点与可视节点；VSlot 自动补挂必须跳过
+│  └─ PhysicsBody  ← Prefab 内置 Static RigidBody2D + BoxCollider2D，物理尺寸在此编辑
 ├─ Startgridpos     ← ColorBlockGrid 的底部中心；不得挂 StaticPlate
 └─ BoxCollectPos    ← CollectBox 第一行中心；不得挂 StaticPlate
 

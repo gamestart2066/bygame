@@ -413,13 +413,5 @@ export class TrackSystem extends Component {
             g.stroke();
         }
 
-        // 入口标记
-        const e = this.getEntryPos();
-        g.lineWidth = 3;
-        g.strokeColor = new Color(240, 240, 120, 200);
-        g.moveTo(e.x - 34, e.y + 24);
-        g.lineTo(e.x, e.y + 4);
-        g.lineTo(e.x + 34, e.y + 24);
-        g.stroke();
     }
 }
