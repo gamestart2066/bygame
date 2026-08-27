@@ -1,6 +1,6 @@
 import {
     _decorator, Component, Node, Vec2, Vec3, UITransform, Prefab, JsonAsset, instantiate,
-    PhysicsSystem2D, EPhysics2DDrawFlags,
+    PhysicsSystem2D, EPhysics2DDrawFlags, Graphics, Color,
 } from 'cc';
 import { BallColor, BallState, CFG, GameState } from '../core/GameTypes';
 import { EventBus, GameEvent, GameResultData } from '../core/EventBus';
@@ -208,6 +208,7 @@ export class GameManager extends Component {
         // 必须手动下沉到 TerrainLayer 的位置，否则轨道图形会盖住球与箱子。
         const trackIndex = this._terrainLayer ? this._terrainLayer.getSiblingIndex() : 0;
         this._track.node.setSiblingIndex(trackIndex);
+        this.drawEntranceAntiJamDebugZone();
 
         this.setupBlocks(plan);
         this._untrackedBallCount = 0;
@@ -226,6 +227,27 @@ export class GameManager extends Component {
         EventBus.emit(GameEvent.LevelLoaded, { levelId: def.levelId });
         this.emitProgress();
         return true;
+    }
+
+    /** 临时可视化：与 updateEntranceAntiJam 使用完全相同的空间边界。 */
+    private drawEntranceAntiJamDebugZone(): void {
+        if (!CFG.debugDrawEntranceAntiJamZone) return;
+        const node = new Node('EntranceAntiJamDebugZone');
+        node.addComponent(UITransform);
+        node.setParent(this.node);
+        node.setPosition(this._entryCenter);
+        const graphics = node.addComponent(Graphics);
+        graphics.lineWidth = 3;
+        graphics.strokeColor = new Color(255, 40, 190, 230);
+        graphics.fillColor = new Color(255, 40, 190, 38);
+        graphics.rect(
+            -CFG.entryZoneWidth / 2,
+            0,
+            CFG.entryZoneWidth,
+            CFG.entranceAntiJamZoneHeight,
+        );
+        graphics.fill();
+        graphics.stroke();
     }
 
     private setupPhysics(): void {
@@ -832,7 +854,9 @@ export class GameManager extends Component {
             waiting.push(ball);
         }
         waiting.sort((a, b) => a.waitTicket - b.waitTicket);
-        if (waiting.length > 0 && this._track.tryAccept(waiting[0], this._trackBallLayer)) {
+        if (!CFG.debugDisableTrackEntry
+            && waiting.length > 0
+            && this._track.tryAccept(waiting[0], this._trackBallLayer)) {
             this.releaseUntrackedReservation();
             this.emitProgress();
             this._entranceJamTime = 0;
@@ -842,14 +866,15 @@ export class GameManager extends Component {
     }
 
     /**
-     * 只在轨道有入口空槽、Gate 上方至少两球长时间低速时轻推少量球，
+     * 轨道未满且 Gate 上方至少两球长时间低速时轻推少量球，
      * 打破 V 槽出口对冲形成的稳定力链。不占用槽位，不改 BallState。
      */
     private updateEntranceAntiJam(dt: number): void {
         if (!this._track) return;
 
-        // 没有经过入口的空槽时属于正常轨道等待，不是物理卡死。
-        if (this._track.findEntrySlot() < 0) {
+        // 空槽是否正好经过入口是瞬时状态，不能用它清空持续的物理卡死计时。
+        // 只有轨道真正满载时，Gate 上方等待才是正常容量限制。
+        if (this._track.isFull()) {
             this._entranceJamTime = 0;
             return;
         }
@@ -858,16 +883,23 @@ export class GameManager extends Component {
         const minY = this._entryCenter.y;
         const maxY = minY + CFG.entranceAntiJamZoneHeight;
         const speedLimitSq = CFG.entranceAntiJamLowSpeed * CFG.entranceAntiJamLowSpeed;
-        const stalled = this._balls.filter((ball) => {
+        const nearby = this._balls.filter((ball) => {
             if (!ball.isWaitable()) return false;
             const p = ball.node.position;
             return Math.abs(p.x - this._entryCenter.x) <= halfWidth
-                && p.y >= minY && p.y <= maxY
-                && ball.getPhysicsSpeedSquared() <= speedLimitSq;
+                && p.y >= minY && p.y <= maxY;
         });
+        const stalled = nearby.filter((ball) => ball.getPhysicsSpeedSquared() <= speedLimitSq);
 
-        if (stalled.length < CFG.entranceAntiJamMinBalls) {
+        if (nearby.length === 0) {
             this._entranceJamTime = 0;
+            return;
+        }
+        if (stalled.length < CFG.entranceAntiJamMinBalls) {
+            this._entranceJamTime = Math.max(
+                0,
+                this._entranceJamTime - dt * CFG.entranceAntiJamTimeDecayMultiplier,
+            );
             return;
         }
 
@@ -876,10 +908,22 @@ export class GameManager extends Component {
 
         stalled.sort((a, b) => a.node.position.y - b.node.position.y);
         const count = Math.min(CFG.entranceAntiJamMaxBalls, stalled.length);
-        const pushX = CFG.entranceAntiJamVelocityX * this._entranceJamDirection;
+        // 只统计已生成且仍在物理下落/等待阶段的真实 Ball。
+        // CFG 速度表示一批球时的基准，实际力度按球数线性缩放。
+        const physicalBallCount = this._balls.reduce(
+            (total, ball) => total + (ball.isWaitable() ? 1 : 0),
+            0,
+        );
+        const velocityScale = physicalBallCount / Math.max(1, CFG.ballsPerBlock);
+        const pushX = CFG.entranceAntiJamVelocityX
+            * velocityScale
+            * this._entranceJamDirection;
         for (let i = 0; i < count; i++) {
             // 两球时予以略微不同的竖直增量，避免平移后又恢复对称力链。
-            stalled[i].addAntiJamVelocity(pushX, CFG.entranceAntiJamVelocityY + i * 6);
+            stalled[i].addAntiJamVelocity(
+                pushX,
+                (CFG.entranceAntiJamVelocityY + i * 6) * velocityScale,
+            );
         }
         this._entranceJamDirection *= -1;
         this._entranceJamTime = 0;

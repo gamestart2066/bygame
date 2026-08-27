@@ -178,7 +178,7 @@ SystemStatic(墙) → Track → BoxLayer → BallLayer(下落/等待) → TrackB
 | BallPool 预热 | `GameManager.startLevel()` 在 Playing 前按 `CFG.ballPoolPrewarmCount` 实例化并 reset（当前 18） | 首次点击不集中 instantiate；不足时仍可安全扩容 |
 | 轨道两段速度 | `CFG.trackSpeed` 是关卡基础速度；全部 ColorBlock 至少点击一次后使用 `trackAllBlocksClickedMultiplier`（当前 2） | 运行时倍率只属于本关，不回写 CFG、不污染 Restart/下一关 |
 | 轨道外球上限 | 点击时整批预占 `ballsPerBlock`，轨道 `tryAccept` 成功后逐球释放；上限=`ballsPerBlock × maxUntrackedBallBatches`（当前 36） | 不能只数已 instantiate 的球，否则快速连点会在 Slot Tween 期间突破上限 |
-| EntranceGate 物理防卡死 | 只有轨道存在入口空槽，且 Gate 上方至少 `entranceAntiJamMinBalls` 颗球连续低速达到 `entranceAntiJamDelay` 时，才对最低的少量球叠加交替方向速度 | 不改 BallState/槽位/入轨判定；正常等待轨道槽位时不触发，参数统一在 `CFG` |
+| EntranceGate 物理防卡死 | 轨道未满，且 Gate 上方至少 `entranceAntiJamMinBalls` 颗球连续低速达到 `entranceAntiJamDelay` 时，对最低的少量球叠加交替方向速度；低速数量短暂不足时按 `entranceAntiJamTimeDecayMultiplier` 衰减而非清零；`entranceAntiJamVelocityX/Y` 是一批球时的基准，实际速度按场内 Falling/Waiting 真实 Ball 数量与 `ballsPerBlock` 的比例线性缩放 | 不改 BallState/槽位/入轨判定；禁止使用“空槽正好经过入口”的瞬时状态重置物理卡死计时，参数统一在 `CFG` |
 | 入口**每帧最多放行 1 球** | `handleEntry` 只处理队首 | 防止同帧多球抢占同一槽位 |
 | 槽位**立即占位** | `tryAccept` 先写 `_slots[i]` 再播吸附动画 | 动画期间槽位不能被再次分配 |
 | 轨道球连续补位 | 按入轨顺序以首球为头，后球沿轨道以 `trackCatchUpSpeedMultiplier` 逐槽追赶；目标槽先预留，真正到位后才转移 `_slots` 所有权 | 禁止瞬间压紧数组或跨越已占槽；追赶途中仍保持 OnTrack，可正常收纳，收纳时必须释放目标预留 |

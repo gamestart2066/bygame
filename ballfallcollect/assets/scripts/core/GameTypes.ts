@@ -164,14 +164,21 @@ export const CFG = {
     entryZoneWidth: 170,
     entryZoneHeight: 90,
     /** EntranceGate 上方物理球稳定对冲时的防卡死扰动。 */
-    entranceAntiJamDelay: 0.8,
-    entranceAntiJamCooldown: 0.6,
+    /** 临时调试：跳过逻辑入轨，保留 Gate 物理与防卡死检测。验证后改回 false。 */
+    debugDisableTrackEntry: false,
+    /** 临时调试：画出 EntranceGate 上方的防卡死判定区域。 */
+    debugDrawEntranceAntiJamZone: false,
+    entranceAntiJamDelay: 3,
+    entranceAntiJamCooldown: 5,
     entranceAntiJamZoneHeight: 180,
-    entranceAntiJamLowSpeed: 12,
-    entranceAntiJamMinBalls: 2,
-    entranceAntiJamMaxBalls: 2,
-    entranceAntiJamVelocityX: 42,
-    entranceAntiJamVelocityY: 30,
+    entranceAntiJamLowSpeed: 0.1,
+    /** 低速条件短暂不足时缓慢衰减卡死计时，避免 Box2D 微抖导致瞬间清零。 */
+    entranceAntiJamTimeDecayMultiplier: 1,
+    entranceAntiJamMinBalls: 3,
+    entranceAntiJamMaxBalls: 1,
+    /** 一批（ballsPerBlock）真实物理球在 V 槽内时的基准扰动速度。 */
+    entranceAntiJamVelocityX: 8,
+    entranceAntiJamVelocityY: 6,
     /** 空槽与入口的**弧长**容差（像素）内才允许吸附 */
     entryArcTolerance: 34,
     /** 跳入轨道的总动画时长与上抬高度 */
