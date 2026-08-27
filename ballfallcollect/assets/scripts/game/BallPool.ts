@@ -36,6 +36,7 @@ export class BallPool {
             this.dispose();
             return false;
         }
+        // Ball.prefab/Sprite 上手动绑定的基础图是唯一来源；代码只读取和共享，禁止覆盖。
         BallVisuals.configure(probe.ballSprite!.spriteFrame!);
         probe.resetForPool();
         probe.node.setParent(this._poolRoot);

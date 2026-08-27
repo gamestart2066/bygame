@@ -1,0 +1,112 @@
+// Based on Cocos Creator 3.8.6 builtin-sprite.effect.
+// The texture supplies grayscale lightness/alpha; Sprite.color supplies instance tint.
+CCEffect %{
+  techniques:
+  - passes:
+    - vert: sprite-vs:vert
+      frag: sprite-fs:frag
+      depthStencilState:
+        depthTest: false
+        depthWrite: false
+      blendState:
+        targets:
+        - blend: true
+          blendSrc: src_alpha
+          blendDst: one_minus_src_alpha
+          blendDstAlpha: one_minus_src_alpha
+      rasterizerState:
+        cullMode: none
+      properties:
+        alphaThreshold: { value: 0.5 }
+        shadowStrength:    { value: 0.70, target: toneParams.x, editor: { slide: true, range: [0.0, 1.0], step: 0.01 } }
+        highlightStrength: { value: 0.30, target: toneParams.y, editor: { slide: true, range: [0.0, 1.0], step: 0.01 } }
+        saturation:        { value: 1.18, target: toneParams.z, editor: { slide: true, range: [0.0, 2.0], step: 0.01 } }
+        shadowStart:       { value: 0.12, target: rangeParams.x, editor: { slide: true, range: [0.0, 1.0], step: 0.01 } }
+        shadowEnd:         { value: 0.62, target: rangeParams.y, editor: { slide: true, range: [0.0, 1.0], step: 0.01 } }
+        highlightStart:    { value: 0.72, target: rangeParams.z, editor: { slide: true, range: [0.0, 1.0], step: 0.01 } }
+        highlightEnd:      { value: 0.98, target: rangeParams.w, editor: { slide: true, range: [0.0, 1.0], step: 0.01 } }
+}%
+
+CCProgram sprite-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #if USE_LOCAL
+    #include <builtin/uniforms/cc-local>
+  #endif
+  #if SAMPLE_FROM_RT
+    #include <common/common-define>
+  #endif
+  in vec3 a_position;
+  in vec2 a_texCoord;
+  in vec4 a_color;
+
+  out vec4 color;
+  out vec2 uv0;
+
+  vec4 vert () {
+    vec4 pos = vec4(a_position, 1);
+
+    #if USE_LOCAL
+      pos = cc_matWorld * pos;
+    #endif
+
+    #if USE_PIXEL_ALIGNMENT
+      pos = cc_matView * pos;
+      pos.xyz = floor(pos.xyz);
+      pos = cc_matProj * pos;
+    #else
+      pos = cc_matViewProj * pos;
+    #endif
+
+    uv0 = a_texCoord;
+    #if SAMPLE_FROM_RT
+      CC_HANDLE_RT_SAMPLE_FLIP(uv0);
+    #endif
+    color = a_color;
+    return pos;
+  }
+}%
+
+CCProgram sprite-fs %{
+  precision highp float;
+  #include <builtin/internal/embedded-alpha>
+  #include <builtin/internal/alpha-test>
+
+  in vec4 color;
+
+  uniform TintControls {
+    vec4 toneParams;
+    vec4 rangeParams;
+  };
+
+  #if USE_TEXTURE
+    in vec2 uv0;
+    #pragma builtin(local)
+    layout(set = 2, binding = 12) uniform sampler2D cc_spriteTexture;
+  #endif
+
+  vec4 frag () {
+    vec4 texel = vec4(1, 1, 1, 1);
+    #if USE_TEXTURE
+      texel = CCSampleWithAlphaSeparated(cc_spriteTexture, uv0);
+    #endif
+
+    float gray = dot(texel.rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec3 tint = color.rgb;
+    vec3 shadowColor = tint * toneParams.x;
+    vec3 highlightColor = mix(tint, vec3(1.0), toneParams.y);
+
+    // Keep the requested gameplay hue in the broad middle range, while restoring
+    // deliberate dark volume and clean white highlights from the grayscale source.
+    float shadowMix = smoothstep(rangeParams.x, rangeParams.y, gray);
+    float highlightMix = smoothstep(rangeParams.z, rangeParams.w, gray);
+    vec3 shaded = mix(shadowColor, tint, shadowMix);
+    shaded = mix(shaded, highlightColor, highlightMix);
+    float shadedLuma = dot(shaded, vec3(0.2126, 0.7152, 0.0722));
+    shaded = clamp(mix(vec3(shadedLuma), shaded, toneParams.z), 0.0, 1.0);
+
+    vec4 o = vec4(shaded, texel.a * color.a);
+    ALPHA_TEST(o);
+    return o;
+  }
+}%

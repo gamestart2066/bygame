@@ -450,11 +450,8 @@ export class ColorBlock extends Component {
             return;
         }
 
-        const empty = this.isEmpty();
         const base = getColor(this.colorId);
-        this._bgSprite.color = empty
-            ? new Color(base.r * 0.35, base.g * 0.35, base.b * 0.35, this._bgSprite.color.a)
-            : new Color(base.r, base.g, base.b, this._bgSprite.color.a);
+        this._bgSprite.color = new Color(base.r, base.g, base.b, 255);
     }
 
     /** Slot Sprite 就是格子内尚未释放的球；SpriteFrame 与实际 Ball 共用 BallVisuals。 */
@@ -471,7 +468,7 @@ export class ColorBlock extends Component {
         }
     }
 
-    /** Lid 使用本格颜色；锁定时显示，解锁后隐藏。 */
+    /** Lid 使用本格颜色且不压暗；锁定时显示，解锁后缩小隐藏。 */
     private redrawLid(): void {
         if (!this._lid) return;
         this.redrawLidColor();
@@ -484,14 +481,13 @@ export class ColorBlock extends Component {
     }
 
     private redrawLidColor(): void {
+        if (!this._lidSprite) return;
         if (this.blockType === ColorBlockType.Unknown && !this._typeRevealed) {
-            if (this._lidSprite) this._lidSprite.color = new Color(255, 255, 255, 255);
+            this._lidSprite.color = new Color(255, 255, 255, 255);
             return;
         }
         const base = getColor(this.colorId);
-        if (this._lidSprite) {
-            this._lidSprite.color = new Color(base.r, base.g, base.b, this._lidSprite.color.a);
-        }
+        this._lidSprite.color = new Color(base.r, base.g, base.b, 255);
     }
 
     /** 胜负、Restart 或销毁前取消尚未执行的逐球释放。 */

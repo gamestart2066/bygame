@@ -332,7 +332,6 @@ export class TrackSystem extends Component {
                 );
             }
         }
-        this.drawTrack();
     }
 
     /**
@@ -409,7 +408,7 @@ export class TrackSystem extends Component {
 
     // ==================== 绘制 ====================
 
-    /** 用路径采样绘制轨道，保证与逻辑路径完全一致 */
+    /** 用逻辑路径绘制多层内凹玩具传送带，槽位节点仍独立全程显示。 */
     private drawTrack(): void {
         const g = this._graphics;
         if (!g) return;
@@ -418,15 +417,22 @@ export class TrackSystem extends Component {
         const segs = Math.max(24, CFG.trackDrawSegments);
         const P = this.perimeter;
 
-        g.lineWidth = 6;
-        g.strokeColor = new Color(110, 115, 130, 255);
-        for (let i = 0; i <= segs; i++) {
-            const p = this.getPointAtLength((i / segs) * P);
-            if (i === 0) g.moveTo(p.x, p.y);
-            else g.lineTo(p.x, p.y);
-        }
-        g.close();
-        g.stroke();
+        const strokePath = (width: number, color: Color): void => {
+            g.lineWidth = width;
+            g.strokeColor = color;
+            for (let i = 0; i <= segs; i++) {
+                const p = this.getPointAtLength((i / segs) * P);
+                if (i === 0) g.moveTo(p.x, p.y);
+                else g.lineTo(p.x, p.y);
+            }
+            g.close();
+            g.stroke();
+        };
+
+        strokePath(36, new Color(60, 120, 155, 75));
+        strokePath(30, new Color(229, 247, 251, 255));
+        strokePath(21, new Color(128, 177, 203, 255));
+        strokePath(13, new Color(191, 222, 236, 255));
 
     }
 }

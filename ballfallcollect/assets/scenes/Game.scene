@@ -331,16 +331,16 @@
     "_dstBlendFactor": 4,
     "_color": {
       "__type__": "cc.Color",
-      "r": 162,
-      "g": 202,
-      "b": 201,
+      "r": 255,
+      "g": 255,
+      "b": 255,
       "a": 255
     },
     "_spriteFrame": {
-      "__uuid__": "a5e9ea98-d80f-49fc-b42c-d4284173ce2f@f9941",
+      "__uuid__": "64e599fd-9563-44d3-ba44-a32f3570c5de@f9941",
       "__expectedType__": "cc.SpriteFrame"
     },
-    "_type": 0,
+    "_type": 1,
     "_fillType": 0,
     "_sizeMode": 0,
     "_fillCenter": {
@@ -623,9 +623,9 @@
     "_dstBlendFactor": 4,
     "_color": {
       "__type__": "cc.Color",
-      "r": 170,
-      "g": 175,
-      "b": 190,
+      "r": 62,
+      "g": 111,
+      "b": 159,
       "a": 255
     },
     "_string": "第 1 关",
@@ -641,7 +641,7 @@
     "_isSystemFontUsed": true,
     "_spacingX": 0,
     "_isItalic": false,
-    "_isBold": false,
+    "_isBold": true,
     "_isUnderline": false,
     "_underlineHeight": 2,
     "_cacheMode": 0,
@@ -788,9 +788,9 @@
     "_dstBlendFactor": 4,
     "_color": {
       "__type__": "cc.Color",
-      "r": 240,
-      "g": 240,
-      "b": 245,
+      "r": 74,
+      "g": 126,
+      "b": 170,
       "a": 255
     },
     "_string": "",
@@ -806,7 +806,7 @@
     "_isSystemFontUsed": true,
     "_spacingX": 0,
     "_isItalic": false,
-    "_isBold": false,
+    "_isBold": true,
     "_isUnderline": false,
     "_underlineHeight": 2,
     "_cacheMode": 0,

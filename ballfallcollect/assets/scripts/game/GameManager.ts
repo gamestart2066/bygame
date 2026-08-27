@@ -69,7 +69,6 @@ export class GameManager extends Component {
     private _collectBoxPrefab: Prefab | null = null;
     private _colorBlockPrefab: Prefab | null = null;
     private _colorBlockBoxesPrefab: Prefab | null = null;
-    private _rectPrefab: Prefab | null = null;
     private _vslotPrefab: Prefab | null = null;
 
     private _terrainLayer: Node | null = null;
@@ -157,15 +156,12 @@ export class GameManager extends Component {
         this._colorBlockBoxesPrefab = await ResManager.load(
             ResPaths.prefab(PrefabNames.ColorBlockBoxes), Prefab
         );
-        this._rectPrefab = await ResManager.load(
-            ResPaths.prefab(PrefabNames.Rect), Prefab
-        );
         this._vslotPrefab = await ResManager.load(
             ResPaths.prefab(PrefabNames.VSlot), Prefab
         );
         const grid = def.grid;
         const needsBlockBoxes = grid.some((row) => row.includes(ColorBlockType.Boxes));
-        if (!this._ballSlotPrefab || !this._collectBoxPrefab || !this._colorBlockPrefab || !this._rectPrefab ||
+        if (!this._ballSlotPrefab || !this._collectBoxPrefab || !this._colorBlockPrefab ||
             !this._vslotPrefab || !grid ||
             (needsBlockBoxes && !this._colorBlockBoxesPrefab)) {
             const errors = [
@@ -519,9 +515,9 @@ export class GameManager extends Component {
     }
 
     /**
-     * 固定 7×7 空区由 rect 本体 + 独立连接条组成：
-     * 空格之间填横/纵连接条，四格全空时才填交叉角块；
-     * 三空一占的内 90° 转角保留角部间距，避免斜对角 rect 露到玩法格边缘。
+     * 固定 7×7 空区绘制成一块连续的玩具机器面板。
+     * 所有单元与连接桥都落在同一个 Graphics 中：内部重叠消除接缝，
+     * 只有与玩法格相邻的真实外边界保留圆角和网格间距。
      */
     private createEmptyGridRects(
         parent: Node,
@@ -536,7 +532,6 @@ export class GameManager extends Component {
         stepY: number,
         gridWidth: number,
     ): boolean {
-        if (!this._rectPrefab) return false;
         const occupied = Array.from({ length: rows }, () => new Array(columns).fill(false));
         for (let row = 0; row < grid.length; row++) {
             for (let col = 0; col < grid[row].length; col++) {
@@ -546,9 +541,14 @@ export class GameManager extends Component {
         }
 
         const layer = new Node('RectFillLayer');
-        layer.addComponent(UITransform);
+        const layerUI = layer.addComponent(UITransform);
+        layerUI.setAnchorPoint(0.5, 0);
+        layerUI.setContentSize(gridWidth, blockHeight + Math.max(0, rows - 1) * stepY);
         layer.setParent(parent);
         layer.setPosition(0, 0, 0);
+        // 必须位于所有 ColorBlock 之前；它只承担背景，不接收输入。
+        layer.setSiblingIndex(0);
+        const graphics = layer.addComponent(Graphics);
 
         const gapX = Math.max(0, stepX - blockWidth);
         const gapY = Math.max(0, stepY - blockHeight);
@@ -556,84 +556,109 @@ export class GameManager extends Component {
             -gridWidth / 2 + blockWidth / 2 + col * stepX;
         const cellY = (row: number): number =>
             blockHeight / 2 + (rows - 1 - row) * stepY;
-        const addRect = (name: string, x: number, y: number, width: number, height: number): boolean => {
-            if (width <= 0 || height <= 0) return true;
-            const node = instantiate(this._rectPrefab!);
-            const ui = node.getComponent(UITransform);
-            if (!ui || ui.contentSize.width <= 0 || ui.contentSize.height <= 0) {
-                console.error('[GameManager] rect.prefab 根节点必须包含有效 UITransform。');
-                node.destroy();
-                return false;
+        // 把“单元 + 桥 + 四空交点”展开为 13×13 微网格。
+        // 微格宽高交替为 block / gap，随后只提取整个区域的外轮廓。
+        const microRows = rows * 2 - 1;
+        const microCols = columns * 2 - 1;
+        const filled = Array.from({ length: microRows }, () => new Array(microCols).fill(false));
+        const isEmpty = (row: number, col: number): boolean =>
+            row >= 0 && row < rows && col >= 0 && col < columns && !occupied[row][col];
+
+        for (let mr = 0; mr < microRows; mr++) {
+            for (let mc = 0; mc < microCols; mc++) {
+                const row = Math.floor(mr / 2);
+                const col = Math.floor(mc / 2);
+                if (mr % 2 === 0 && mc % 2 === 0) {
+                    filled[mr][mc] = isEmpty(row, col);
+                } else if (mr % 2 === 0) {
+                    filled[mr][mc] = isEmpty(row, col) && isEmpty(row, col + 1);
+                } else if (mc % 2 === 0) {
+                    filled[mr][mc] = isEmpty(row, col) && isEmpty(row + 1, col);
+                } else {
+                    filled[mr][mc] = isEmpty(row, col) && isEmpty(row, col + 1)
+                        && isEmpty(row + 1, col) && isEmpty(row + 1, col + 1);
+                }
             }
-            node.name = name;
-            ui.setAnchorPoint(0.5, 0.5);
-            node.setParent(layer);
-            node.setPosition(x, y, 0);
-            node.setScale(width / ui.contentSize.width, height / ui.contentSize.height, 1);
-            return true;
+        }
+
+        const xBounds: number[] = [-gridWidth / 2];
+        for (let mc = 0; mc < microCols; mc++) {
+            xBounds.push(xBounds[mc] + (mc % 2 === 0 ? blockWidth : gapX));
+        }
+        const topY = cellY(0) + blockHeight / 2;
+        const yBounds: number[] = [topY];
+        for (let mr = 0; mr < microRows; mr++) {
+            yBounds.push(yBounds[mr] - (mr % 2 === 0 ? blockHeight : gapY));
+        }
+
+        interface RegionEdge { ax: number; ay: number; bx: number; by: number; }
+        const edges: RegionEdge[] = [];
+        const microFilled = (mr: number, mc: number): boolean =>
+            mr >= 0 && mr < microRows && mc >= 0 && mc < microCols && filled[mr][mc];
+        for (let mr = 0; mr < microRows; mr++) {
+            for (let mc = 0; mc < microCols; mc++) {
+                if (!filled[mr][mc]) continue;
+                const left = xBounds[mc];
+                const right = xBounds[mc + 1];
+                const top = yBounds[mr];
+                const bottom = yBounds[mr + 1];
+                // 所有边保持填充区域在行进方向左侧；外环与孔洞会自然得到相反绕向。
+                if (!microFilled(mr + 1, mc)) edges.push({ ax: left, ay: bottom, bx: right, by: bottom });
+                if (!microFilled(mr, mc + 1)) edges.push({ ax: right, ay: bottom, bx: right, by: top });
+                if (!microFilled(mr - 1, mc)) edges.push({ ax: right, ay: top, bx: left, by: top });
+                if (!microFilled(mr, mc - 1)) edges.push({ ax: left, ay: top, bx: left, by: bottom });
+            }
+        }
+
+        const pointKey = (x: number, y: number): string => `${x.toFixed(3)}:${y.toFixed(3)}`;
+        const byStart = new Map<string, number[]>();
+        for (let i = 0; i < edges.length; i++) {
+            const key = pointKey(edges[i].ax, edges[i].ay);
+            const list = byStart.get(key) ?? [];
+            list.push(i);
+            byStart.set(key, list);
+        }
+        const used = new Set<number>();
+        const loops: RegionEdge[][] = [];
+        for (let i = 0; i < edges.length; i++) {
+            if (used.has(i)) continue;
+            const loop: RegionEdge[] = [];
+            let edgeIndex = i;
+            const startKey = pointKey(edges[i].ax, edges[i].ay);
+            while (!used.has(edgeIndex)) {
+                const edge = edges[edgeIndex];
+                used.add(edgeIndex);
+                loop.push(edge);
+                const endKey = pointKey(edge.bx, edge.by);
+                if (endKey === startKey) break;
+                const candidates = byStart.get(endKey) ?? [];
+                const next = candidates.find((candidate) => !used.has(candidate));
+                if (next === undefined) break;
+                edgeIndex = next;
+            }
+            if (loop.length >= 4) loops.push(loop);
+        }
+
+        const traceLoops = (offsetY: number = 0): void => {
+            for (const loop of loops) {
+                graphics.moveTo(loop[0].ax, loop[0].ay + offsetY);
+                for (const edge of loop) graphics.lineTo(edge.bx, edge.by + offsetY);
+                graphics.close();
+            }
         };
 
-        // 单元本体始终保持 ColorBlock 的实际尺寸；间距只由下面的连接件决定是否填充。
-        for (let row = 0; row < rows; row++) {
-            for (let col = 0; col < columns; col++) {
-                if (occupied[row][col]) continue;
-                if (!addRect(`Rect_${row}_${col}`, cellX(col), cellY(row), blockWidth, blockHeight)) {
-                    layer.destroy();
-                    return false;
-                }
-            }
-        }
-
-        // 两个正交空格之间单独补连接条，不再靠缩放整块 rect 猜测边界。
-        for (let row = 0; row < rows; row++) {
-            for (let col = 0; col + 1 < columns; col++) {
-                if (occupied[row][col] || occupied[row][col + 1]) continue;
-                if (!addRect(
-                    `RectJoinH_${row}_${col}`,
-                    (cellX(col) + cellX(col + 1)) / 2,
-                    cellY(row),
-                    gapX,
-                    blockHeight,
-                )) {
-                    layer.destroy();
-                    return false;
-                }
-            }
-        }
-        for (let row = 0; row + 1 < rows; row++) {
-            for (let col = 0; col < columns; col++) {
-                if (occupied[row][col] || occupied[row + 1][col]) continue;
-                if (!addRect(
-                    `RectJoinV_${row}_${col}`,
-                    cellX(col),
-                    (cellY(row) + cellY(row + 1)) / 2,
-                    blockWidth,
-                    gapY,
-                )) {
-                    layer.destroy();
-                    return false;
-                }
-            }
-        }
-
-        // 四格交叉点只有在四个方向全为空时才填充。
-        // 只要任一斜向是玩法格，就留下完整 gapX × gapY 角部间距。
-        for (let row = 0; row + 1 < rows; row++) {
-            for (let col = 0; col + 1 < columns; col++) {
-                if (occupied[row][col] || occupied[row][col + 1] ||
-                    occupied[row + 1][col] || occupied[row + 1][col + 1]) continue;
-                if (!addRect(
-                    `RectJoinCorner_${row}_${col}`,
-                    (cellX(col) + cellX(col + 1)) / 2,
-                    (cellY(row) + cellY(row + 1)) / 2,
-                    gapX,
-                    gapY,
-                )) {
-                    layer.destroy();
-                    return false;
-                }
-            }
-        }
+        // 轮廓只存在于连通区真正的外边界，内部没有任何抗锯齿边缘。
+        graphics.lineWidth = 12;
+        graphics.strokeColor = new Color(63, 136, 156, 70);
+        traceLoops(-5);
+        graphics.stroke();
+        graphics.lineWidth = 7;
+        graphics.strokeColor = new Color(224, 250, 250, 255);
+        traceLoops();
+        graphics.stroke();
+        graphics.fillColor = new Color(151, 218, 220, 255);
+        traceLoops();
+        graphics.fill();
         return true;
     }
 
@@ -788,6 +813,8 @@ export class GameManager extends Component {
         this._columns = [];
         for (let c = 0; c < colCount; c++) this._columns.push([]);
 
+        this.createBoxDock(columns);
+
         let seq = 0;
         for (let c = 0; c < colCount; c++) {
             const colors = columns[c] ?? [];
@@ -807,6 +834,37 @@ export class GameManager extends Component {
         }
         for (let c = 0; c < colCount; c++) this.refreshColumn(c, false);
         return true;
+    }
+
+    /** 收纳箱背后的统一玩具托盘；只负责视觉，不参与布局与收纳判定。 */
+    private createBoxDock(columns: BallColor[][]): void {
+        if (!this._boxLayer || !this._collectBoxPrefab) return;
+        const maxRows = Math.max(1, ...columns.map((column) => column?.length ?? 0));
+        const prefabUI = this._collectBoxPrefab.data?.getComponent(UITransform);
+        const boxWidth = prefabUI?.contentSize.width || CFG.boxWidth;
+        const boxHeight = prefabUI?.contentSize.height || CFG.boxHeight;
+        const width = CFG.boxColumnSpacing * (Math.max(1, CFG.boxColumnCount) - 1)
+            + boxWidth + 44;
+        const height = CFG.boxRowSpacing * (maxRows - 1) + boxHeight + 36;
+        const centerY = this._boxLayoutBase.y - CFG.boxRowSpacing * (maxRows - 1) / 2;
+
+        const dock = new Node('CollectBoxDock');
+        dock.addComponent(UITransform).setContentSize(width, height);
+        dock.setParent(this._boxLayer);
+        dock.setPosition(this._boxLayoutBase.x, centerY - 5, 0);
+        dock.setSiblingIndex(0);
+        const g = dock.addComponent(Graphics);
+        const x = -width / 2;
+        const y = -height / 2;
+        g.fillColor = new Color(55, 117, 151, 80);
+        g.roundRect(x, y - 7, width, height, 24);
+        g.fill();
+        g.fillColor = new Color(224, 245, 250, 255);
+        g.roundRect(x, y, width, height, 24);
+        g.fill();
+        g.fillColor = new Color(185, 222, 235, 255);
+        g.roundRect(x + 7, y + 7, width - 14, height - 14, 18);
+        g.fill();
     }
 
     /** 列的固定 X —— 由收纳箱系统独立定义，与顶部格子无关 */

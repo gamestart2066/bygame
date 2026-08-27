@@ -21,16 +21,16 @@ export enum BallColor {
 
 /** 颜色 ID → 显示颜色 */
 export const COLOR_TABLE: ReadonlyArray<Color> = [
-    new Color(230, 60, 60, 255),    // Red
-    new Color(60, 120, 230, 255),   // Blue
-    new Color(60, 200, 100, 255),   // Green
-    new Color(240, 200, 50, 255),   // Yellow
-    new Color(170, 90, 220, 255),   // Purple
-    new Color(245, 140, 50, 255),   // Orange
-    new Color(45, 205, 220, 255),   // Cyan
-    new Color(245, 90, 170, 255),   // Pink
-    new Color(145, 220, 55, 255),   // Lime
-    new Color(145, 90, 50, 255),    // Brown
+    new Color(240, 50, 50, 255),    // Red    #F03232
+    new Color(50, 172, 240, 255),   // Blue   #32ACF0
+    new Color(61, 219, 54, 255),    // Green  #3DDB36
+    new Color(238, 208, 51, 255),   // Yellow #EED033
+    new Color(171, 51, 238, 255),   // Purple #AB33EE
+    new Color(238, 141, 51, 255),   // Orange #EE8D33
+    new Color(50, 214, 196, 255),   // Cyan   #32D6C4
+    new Color(227, 82, 233, 255),   // Pink   #E352E9
+    new Color(198, 228, 39, 255),   // Lime   #C6E427
+    new Color(204, 110, 48, 255),   // Brown  #CC6E30
 ];
 
 export function getColor(id: BallColor): Color {
@@ -144,7 +144,7 @@ export const CFG = {
     /** 两端圆角半径；**上下直线间距 = 2 × 此值**，越小越扁 */
     trackCornerRadius: 40,
     /** EntranceGate 与轨道上沿之间的垂直空隙；正值表示轨道位于 Gate 下方 */
-    trackEntryGap: 30,
+    trackEntryGap: 40,
     /** 找不到 EntranceGate 时的兜底入口位置（仅防止崩溃） */
     fallbackEntryX: 0,
     fallbackEntryY: 70,
