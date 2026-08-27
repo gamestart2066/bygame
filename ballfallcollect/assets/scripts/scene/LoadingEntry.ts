@@ -86,6 +86,7 @@ export class LoadingEntry extends Component {
 
         // 正式玩法对象的唯一 Prefab 来源；地形空间由关卡网格配置生成。
         items.push({ path: ResPaths.prefab(PrefabNames.Ball), type: Prefab });
+        items.push({ path: ResPaths.prefab(PrefabNames.BallSlot), type: Prefab });
         items.push({ path: ResPaths.prefab(PrefabNames.ColorBlock), type: Prefab });
         items.push({ path: ResPaths.prefab(PrefabNames.VSlot), type: Prefab });
         items.push({ path: ResPaths.prefab(PrefabNames.CollectBox), type: Prefab });

@@ -65,6 +65,7 @@ export class GameManager extends Component {
     private _track: TrackSystem | null = null;
     private _balls: Ball[] = [];
     private _ballPool: BallPool = new BallPool();
+    private _ballSlotPrefab: Prefab | null = null;
     private _collectBoxPrefab: Prefab | null = null;
     private _colorBlockPrefab: Prefab | null = null;
     private _colorBlockBoxesPrefab: Prefab | null = null;
@@ -147,6 +148,9 @@ export class GameManager extends Component {
         this._collectBoxPrefab = await ResManager.load(
             ResPaths.prefab(PrefabNames.CollectBox), Prefab
         );
+        this._ballSlotPrefab = await ResManager.load(
+            ResPaths.prefab(PrefabNames.BallSlot), Prefab
+        );
         this._colorBlockPrefab = await ResManager.load(
             ResPaths.prefab(PrefabNames.ColorBlock), Prefab
         );
@@ -161,7 +165,7 @@ export class GameManager extends Component {
         );
         const grid = def.grid;
         const needsBlockBoxes = grid.some((row) => row.includes(ColorBlockType.Boxes));
-        if (!this._collectBoxPrefab || !this._colorBlockPrefab || !this._rectPrefab ||
+        if (!this._ballSlotPrefab || !this._collectBoxPrefab || !this._colorBlockPrefab || !this._rectPrefab ||
             !this._vslotPrefab || !grid ||
             (needsBlockBoxes && !this._colorBlockBoxesPrefab)) {
             const errors = [
@@ -203,7 +207,7 @@ export class GameManager extends Component {
 
         // 3. 构建运行时对象
         this._entryCenter = this.resolveEntryPos();
-        this._track = TrackSystem.create(this.node, this._entryCenter);
+        this._track = TrackSystem.create(this.node, this._entryCenter, this._ballSlotPrefab);
         // Track 是在各层之后才创建的（要等地形算出入口），
         // 必须手动下沉到 TerrainLayer 的位置，否则轨道图形会盖住球与箱子。
         const trackIndex = this._terrainLayer ? this._terrainLayer.getSiblingIndex() : 0;
@@ -289,8 +293,13 @@ export class GameManager extends Component {
     private buildLayers(): void {
         if (this.autoCreateWalls) {
             const sysLayer = new Node('SystemStatic');
-            sysLayer.addComponent(UITransform);
+            const sysUI = sysLayer.addComponent(UITransform);
             sysLayer.setParent(this.node);
+            const canvasUI = this.getComponent(UITransform);
+            if (canvasUI) {
+                sysUI.setContentSize(canvasUI.contentSize);
+                sysUI.setAnchorPoint(canvasUI.anchorPoint);
+            }
             createWalls(sysLayer);
         }
 
@@ -510,8 +519,9 @@ export class GameManager extends Component {
     }
 
     /**
-     * 固定 7×7 内每个空单元使用一个 rect，并按四边邻居独立计算边界：
-     * rect↔rect 延伸到共同中线保持无缝；rect↔ColorBlock/Boxes 仅缩进该边保留 gridGap。
+     * 固定 7×7 空区由 rect 本体 + 独立连接条组成：
+     * 空格之间填横/纵连接条，四格全空时才填交叉角块；
+     * 三空一占的内 90° 转角保留角部间距，避免斜对角 rect 露到玩法格边缘。
      */
     private createEmptyGridRects(
         parent: Node,
@@ -542,37 +552,86 @@ export class GameManager extends Component {
 
         const gapX = Math.max(0, stepX - blockWidth);
         const gapY = Math.max(0, stepY - blockHeight);
+        const cellX = (col: number): number =>
+            -gridWidth / 2 + blockWidth / 2 + col * stepX;
+        const cellY = (row: number): number =>
+            blockHeight / 2 + (rows - 1 - row) * stepY;
+        const addRect = (name: string, x: number, y: number, width: number, height: number): boolean => {
+            if (width <= 0 || height <= 0) return true;
+            const node = instantiate(this._rectPrefab!);
+            const ui = node.getComponent(UITransform);
+            if (!ui || ui.contentSize.width <= 0 || ui.contentSize.height <= 0) {
+                console.error('[GameManager] rect.prefab 根节点必须包含有效 UITransform。');
+                node.destroy();
+                return false;
+            }
+            node.name = name;
+            ui.setAnchorPoint(0.5, 0.5);
+            node.setParent(layer);
+            node.setPosition(x, y, 0);
+            node.setScale(width / ui.contentSize.width, height / ui.contentSize.height, 1);
+            return true;
+        };
+
+        // 单元本体始终保持 ColorBlock 的实际尺寸；间距只由下面的连接件决定是否填充。
         for (let row = 0; row < rows; row++) {
             for (let col = 0; col < columns; col++) {
                 if (occupied[row][col]) continue;
-
-                const node = instantiate(this._rectPrefab);
-                const ui = node.getComponent(UITransform);
-                if (!ui || ui.contentSize.width <= 0 || ui.contentSize.height <= 0) {
-                    console.error('[GameManager] rect.prefab 根节点必须包含有效 UITransform。');
-                    node.destroy();
+                if (!addRect(`Rect_${row}_${col}`, cellX(col), cellY(row), blockWidth, blockHeight)) {
                     layer.destroy();
                     return false;
                 }
-                const leftInset = col > 0 && occupied[row][col - 1] ? gapX / 2 : 0;
-                const rightInset = col + 1 < columns && occupied[row][col + 1] ? gapX / 2 : 0;
-                const topInset = row > 0 && occupied[row - 1][col] ? gapY / 2 : 0;
-                const bottomInset = row + 1 < rows && occupied[row + 1][col] ? gapY / 2 : 0;
-                const targetWidth = stepX - leftInset - rightInset;
-                const targetHeight = stepY - topInset - bottomInset;
-                const centerOffsetX = (leftInset - rightInset) / 2;
-                const centerOffsetY = (bottomInset - topInset) / 2;
-                node.setParent(layer);
-                node.setPosition(
-                    -gridWidth / 2 + blockWidth / 2 + col * stepX + centerOffsetX,
-                    blockHeight / 2 + (rows - 1 - row) * stepY + centerOffsetY,
-                    0,
-                );
-                node.setScale(
-                    targetWidth / ui.contentSize.width,
-                    targetHeight / ui.contentSize.height,
-                    1,
-                );
+            }
+        }
+
+        // 两个正交空格之间单独补连接条，不再靠缩放整块 rect 猜测边界。
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col + 1 < columns; col++) {
+                if (occupied[row][col] || occupied[row][col + 1]) continue;
+                if (!addRect(
+                    `RectJoinH_${row}_${col}`,
+                    (cellX(col) + cellX(col + 1)) / 2,
+                    cellY(row),
+                    gapX,
+                    blockHeight,
+                )) {
+                    layer.destroy();
+                    return false;
+                }
+            }
+        }
+        for (let row = 0; row + 1 < rows; row++) {
+            for (let col = 0; col < columns; col++) {
+                if (occupied[row][col] || occupied[row + 1][col]) continue;
+                if (!addRect(
+                    `RectJoinV_${row}_${col}`,
+                    cellX(col),
+                    (cellY(row) + cellY(row + 1)) / 2,
+                    blockWidth,
+                    gapY,
+                )) {
+                    layer.destroy();
+                    return false;
+                }
+            }
+        }
+
+        // 四格交叉点只有在四个方向全为空时才填充。
+        // 只要任一斜向是玩法格，就留下完整 gapX × gapY 角部间距。
+        for (let row = 0; row + 1 < rows; row++) {
+            for (let col = 0; col + 1 < columns; col++) {
+                if (occupied[row][col] || occupied[row][col + 1] ||
+                    occupied[row + 1][col] || occupied[row + 1][col + 1]) continue;
+                if (!addRect(
+                    `RectJoinCorner_${row}_${col}`,
+                    (cellX(col) + cellX(col + 1)) / 2,
+                    (cellY(row) + cellY(row + 1)) / 2,
+                    gapX,
+                    gapY,
+                )) {
+                    layer.destroy();
+                    return false;
+                }
             }
         }
         return true;

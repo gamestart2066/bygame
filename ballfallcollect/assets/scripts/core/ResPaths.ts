@@ -40,6 +40,7 @@ export const SceneNames = {
 /** 通用 Prefab 文件名。路径统一由 ResPaths.prefab() 生成。 */
 export const PrefabNames = {
     Ball: 'Ball',
+    BallSlot: 'BallSlot',
     ColorBlock: 'ColorBlock',
     ColorBlockBoxes: 'ColorBlockBoxes',
     Rect: 'rect',

@@ -196,9 +196,9 @@ export const CFG = {
     /** 固定列数 */
     boxColumnCount: 4,
     /** 相邻列中心点的 X 间距，应略大于 boxWidth */
-    boxColumnSpacing: 125,
+    boxColumnSpacing: 145,
     /** 相邻行中心点的 Y 间距，应略大于 boxHeight */
-    boxRowSpacing: 70,
+    boxRowSpacing: 50,
     /** 列内向上补位的平移动画时长 */
     boxMoveDuration: 0.25,
     /** 收纳判定：球与箱的**水平**对齐阈值（球经过箱子上方即收纳）

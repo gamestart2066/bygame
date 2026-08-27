@@ -31,10 +31,10 @@ export function createPlate(
     node.setPosition(x, y, 0);
     node.angle = angleDeg;
 
-    const g = node.addComponent(Graphics);
-    g.fillColor = color;
-    g.roundRect(-width / 2, -height / 2, width, height, Math.min(4, height / 2));
-    g.fill();
+    // const g = node.addComponent(Graphics);
+    // g.fillColor = color;
+    // g.roundRect(-width / 2, -height / 2, width, height, Math.min(4, height / 2));
+    // g.fill();
 
     const rb = node.addComponent(RigidBody2D);
     rb.type = ERigidBody2DType.Static;
@@ -70,10 +70,22 @@ export function createPlate(
 
 /** 边界墙：防止小球飞出屏幕（左右 + 底部兜底） */
 export function createWalls(parent: Node): void {
-    const halfW = 375;
+    const bounds = parent.getComponent(UITransform);
+    if (!bounds) {
+        console.error('[StaticBuilder] SystemStatic 缺少 UITransform，无法创建屏幕边界墙。');
+        return;
+    }
+
+    const width = bounds.contentSize.width;
+    const height = bounds.contentSize.height;
+    const left = -width * bounds.anchorPoint.x;
+    const right = width * (1 - bounds.anchorPoint.x);
+    const bottom = -height * bounds.anchorPoint.y;
+    const thickness = 12;
+    const halfThickness = thickness / 2;
     const wallColor = new Color(70, 74, 88, 255);
-    createPlate(parent, 'Wall_L', -halfW + 6, 0, 12, 1334, 0, wallColor);
-    createPlate(parent, 'Wall_R', halfW - 6, 0, 12, 1334, 0, wallColor);
+    createPlate(parent, 'Wall_L', left + halfThickness, 0, thickness, height, 0, wallColor);
+    createPlate(parent, 'Wall_R', right - halfThickness, 0, thickness, height, 0, wallColor);
     // 底部兜底：接住任何异常漏球，便于原型期发现问题
-    createPlate(parent, 'Wall_Bottom', 0, -660, 750, 12, 0, wallColor);
+    createPlate(parent, 'Wall_Bottom', (left + right) / 2, bottom + halfThickness, width, thickness, 0, wallColor);
 }

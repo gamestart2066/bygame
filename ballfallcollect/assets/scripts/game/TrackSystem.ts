@@ -1,5 +1,5 @@
 import {
-    _decorator, Component, Node, Graphics, UITransform, Vec3, Color,
+    _decorator, Component, Node, Graphics, UITransform, Vec3, Color, Prefab, instantiate,
 } from 'cc';
 import { CFG } from '../core/GameTypes';
 import { Ball } from './Ball';
@@ -45,6 +45,8 @@ interface CatchUpState {
 export class TrackSystem extends Component {
     /** 槽位占用表，null = 空槽 */
     private _slots: (Ball | null)[] = [];
+    /** BallSlot.prefab 实例，仅承担轨道固定槽位显示。 */
+    private _slotNodes: Node[] = [];
     /** 入轨先后队列；不改变收纳规则，只用于确定追赶时的前球。 */
     private _trackOrder: Ball[] = [];
     /** 球沿轨道向前补空槽的连续运动状态。 */
@@ -62,7 +64,7 @@ export class TrackSystem extends Component {
     /**
      * @param entryLocalPos 轨道入口位置（与 parent 同一坐标系）
      */
-    public static create(parent: Node, entryLocalPos: Vec3): TrackSystem {
+    public static create(parent: Node, entryLocalPos: Vec3, slotPrefab: Prefab): TrackSystem {
         const node = new Node('Track');
         node.addComponent(UITransform);
         node.setParent(parent);
@@ -72,8 +74,30 @@ export class TrackSystem extends Component {
         track.setEntry(entryLocalPos);
         track._slots = new Array(CFG.trackSlotCount).fill(null);
         track._graphics = node.addComponent(Graphics);
+        track.createSlotVisuals(slotPrefab);
         track.drawTrack();
         return track;
+    }
+
+    /** 每个逻辑槽位固定对应一个 BallSlot Prefab 实例。 */
+    private createSlotVisuals(prefab: Prefab): void {
+        this._slotNodes.length = 0;
+        for (let i = 0; i < this._slots.length; i++) {
+            const slotNode = instantiate(prefab);
+            slotNode.name = `BallSlot_${i}`;
+            slotNode.setParent(this.node);
+            slotNode.setPosition(this.getSlotPos(i));
+            this._slotNodes.push(slotNode);
+        }
+    }
+
+    /** 槽位标记全程显示，并随轨道弧长运动。 */
+    private updateSlotVisuals(): void {
+        for (let i = 0; i < this._slotNodes.length; i++) {
+            const slotNode = this._slotNodes[i];
+            slotNode.active = true;
+            slotNode.setPosition(this.getSlotPos(i));
+        }
     }
 
     // ==================== 路径几何 ====================
@@ -280,6 +304,7 @@ export class TrackSystem extends Component {
 
         this.cleanupTrackOrder();
         this.planCatchUps();
+        this.updateSlotVisuals();
 
         const baseSpeed = CFG.trackSpeed * this._speedMultiplier;
         const catchUpSpeed = baseSpeed * Math.max(0, CFG.trackCatchUpSpeedMultiplier - 1);
@@ -402,16 +427,6 @@ export class TrackSystem extends Component {
         }
         g.close();
         g.stroke();
-
-        // 空槽标记
-        for (let i = 0; i < this._slots.length; i++) {
-            if (this._slots[i] !== null) continue;
-            const p = this.getSlotPos(i);
-            g.lineWidth = 2;
-            g.strokeColor = new Color(150, 155, 170, 140);
-            g.circle(p.x, p.y, CFG.ballRadius * 0.65);
-            g.stroke();
-        }
 
     }
 }

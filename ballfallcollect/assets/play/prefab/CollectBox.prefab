@@ -146,7 +146,7 @@
     },
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": -36,
+      "x": -41,
       "y": 0,
       "z": 0
     },
@@ -320,8 +320,8 @@
     },
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 30,
-      "height": 30
+      "width": 36,
+      "height": 36
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -388,8 +388,6 @@
       "__id__": 0
     },
     "fileId": "CollectBoxSlot0",
-    "instance": null,
-    "targetOverrides": null,
     "nestedPrefabInstanceRoots": null
   },
   {
@@ -593,8 +591,8 @@
     },
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 30,
-      "height": 30
+      "width": 36,
+      "height": 36
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -661,8 +659,6 @@
       "__id__": 0
     },
     "fileId": "CollectBoxSlot1",
-    "instance": null,
-    "targetOverrides": null,
     "nestedPrefabInstanceRoots": null
   },
   {
@@ -692,7 +688,7 @@
     },
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": 36,
+      "x": 41,
       "y": 0,
       "z": 0
     },
@@ -866,8 +862,8 @@
     },
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 30,
-      "height": 30
+      "width": 36,
+      "height": 36
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -934,8 +930,6 @@
       "__id__": 0
     },
     "fileId": "CollectBoxSlot2",
-    "instance": null,
-    "targetOverrides": null,
     "nestedPrefabInstanceRoots": null
   },
   {
@@ -965,7 +959,7 @@
     },
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 120,
+      "width": 140,
       "height": 60
     },
     "_anchorPoint": {

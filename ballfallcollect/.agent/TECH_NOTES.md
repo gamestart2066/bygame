@@ -229,8 +229,9 @@ ColorBlockGrid [UITransform anchor=(0.5,0)]  ← 运行时节点
 - `blockColor` 格式为 `[path排序累计百分比上限, [最小颜色id, 最大颜色id]]`，各上限必须严格递增且最后为 100；每段下限由上一段自动推导，按 path 稳定排序生成颜色后映射回原索引
 - `CFG.debugShowColorBlockPath` 默认关闭；临时开启后运行时显示带黑色描边的 `P1/P2/...`，不得依赖该调试节点承载玩法逻辑
 - 收纳箱 `flat` 必须按 path 排序后的 `blockColors` 从后向前展开（每格重复 `ballsPerBlock/boxCapacity` 次），再依 `boxShuffleSegments` 分段洗牌。段顺序不得交叉，同一 seed 必须可复现
+- 轨道的 `_slots` 仍是唯一逻辑占用表；每个索引固定对应一个 `BallSlot.prefab` 实例，实例只负责固定槽位表现并全程显示，随弧长位置逐帧移动，不跟随占用状态显隐，禁止把 Prefab 节点作为逻辑占用来源。
 - ColorBlock 耗尽回调由 `GameManager.onColorBlockDepleted()` 统一调用 `playDepleteAndHide()`：根节点缩小后隐藏，normal/unknown/boxes 派发格子不得分叉保留 Background
-- 外部布局所有行等长、最大 7×7 且列数必须为奇数，保证中心列与固定 7 列可视网格 / Startgridpos 对齐；小布局在固定 7×7 中底部对齐、水平居中，布局内 `0` 与外围补齐空位每格实例化 `rect.prefab`；rect 邻边为空白时延伸到公共中线无缝连接，邻边为 ColorBlock/Boxes 时仅该边缩进以保留 `colorBlockGridGap`；所有非空节点必须通过上下左右相邻形成一个连通块，最底行至少有一个 normal ColorBlock
+- 外部布局所有行等长、最大 7×7 且列数必须为奇数，保证中心列与固定 7 列可视网格 / Startgridpos 对齐；小布局在固定 7×7 中底部对齐、水平居中。空白区域以 `rect.prefab` 组合生成：每个空格生成 ColorBlock 尺寸的本体，两个正交空格间生成独立横/纵连接条，仅四个对角单元全为空时填交叉角块；因此空区连续、与 ColorBlock/Boxes 保留 `colorBlockGridGap`，三空一占的内 90° 转角不会斜向露角。所有非空节点必须通过上下左右相邻形成一个连通块，最底行至少有一个 normal ColorBlock
 - GameManager 保存生成格子的 row/col，并建立四方向邻接索引。只有全局最底行初始解锁；格子成功开始释放时解锁上/下/左/右邻居
 - `ColorBlock.prefab/Lid(Sprite)` 是锁定遮罩：setup 时赋予本格颜色，锁定显示、解锁隐藏；禁止运行时动态创建 Lid
 - 解锁表现使用两个并行 Tween：ColorBlock 根节点按 `CFG.colorBlockUnlockPulseScale/Duration` 脉冲，Lid 按 `colorBlockLidHideDuration` 缩小后隐藏；结束/取消时必须恢复两者 Prefab 基准 scale
