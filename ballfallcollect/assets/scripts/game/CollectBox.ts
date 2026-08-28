@@ -135,6 +135,11 @@ export class CollectBox extends Component {
         return this._collectable && this._inPosition && !this._finished;
     }
 
+    /** 洗牌只能在箱子已落位、无在途收纳球时启动。 */
+    public isStableForShuffle(): boolean {
+        return !this._finished && this._inPosition && this._reserved === 0;
+    }
+
     public getPos(): Vec3 {
         return this.node.position.clone();
     }
@@ -158,9 +163,52 @@ export class CollectBox extends Component {
             .start();
     }
 
+    /** 洗牌交换：先从侧边绕到中点，再落到目标行，避免两箱正面穿插。 */
+    public shuffleTo(target: Vec3, side: number, onDone: () => void): void {
+        if (this._finished) return;
+        Tween.stopAllByTarget(this.node);
+        this._inPosition = false;
+        const start = this.node.position.clone();
+        const midpoint = new Vec3(
+            (start.x + target.x) * 0.5 + Math.sign(side || 1) * CFG.shuffleBoxArcOffset,
+            (start.y + target.y) * 0.5,
+            target.z,
+        );
+        const half = CFG.shuffleBoxDuration * 0.5;
+        tween(this.node)
+            .to(half, { position: midpoint }, { easing: 'quadOut' })
+            .to(CFG.shuffleBoxDuration - half, { position: target }, { easing: 'quadIn' })
+            .call(() => {
+                if (!this._finished && this.node.isValid) {
+                    this._inPosition = true;
+                    onDone();
+                }
+            })
+            .start();
+    }
+
     /** 锁定下一空槽，并返回该槽的世界坐标；同帧多球不会取得同一个槽。 */
     public reserveNextSlot(color: BallColor): Vec3 | null {
         if (!this.canAccept(color)) return null;
+        return this.reserveAvailableSlot();
+    }
+
+    /** 清轨道道具专用：忽略首排与补位状态，仍严格校验颜色和容量。 */
+    public reservePowerUpSlot(color: BallColor): Vec3 | null {
+        if (this._finished
+            || color !== this.colorId
+            || this.count + this._reserved >= CFG.boxCapacity) {
+            return null;
+        }
+        return this.reserveAvailableSlot();
+    }
+
+    /** 批量预订失败时回滚，确保道具启动具有原子性。 */
+    public cancelPowerUpReservation(): void {
+        this._reserved = Math.max(0, this._reserved - 1);
+    }
+
+    private reserveAvailableSlot(): Vec3 | null {
         const index = this.count + this._reserved;
         const slot = this._slotTargets[index];
         if (!slot?.isValid) return null;

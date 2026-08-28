@@ -90,7 +90,9 @@ export const CFG = {
     colorBlockGridRows: 7,
     colorBlockGridColumns: 7,
     /** ColorBlock 配置网格中相邻节点的边缘间距 */
-    colorBlockGridGap: 10,
+    colorBlockGridGap: 5,
+    /** HUD 道具栏底边与 7×7 最大 ColorBlock 网格上沿的间距 */
+    propButtonBarGridGap: 20,
     /** 临时调试：在 ColorBlock 上显示最短解锁 path；正式运行默认关闭 */
     debugShowColorBlockPath: false,
     /** ColorBlock 解锁时根节点脉冲倍率与总时长 */
@@ -214,6 +216,16 @@ export const CFG = {
     boxFinishDuration: 0.25,
     /** 球飞入箱的动画时长 */
     collectDuration: 0.22,
+    /** 清轨道道具：每球错峰、弹起和飞入动画参数 */
+    clearTrackBallStagger: 0.035,
+    clearTrackBurstDuration: 0.18,
+    clearTrackFlyDuration: 0.48,
+    clearTrackBurstHeight: 86,
+    clearTrackBurstOutward: 42,
+    clearTrackVisualScale: 1.35,
+    /** 收纳箱洗牌：交叉换位时的侧向弧度与总时长 */
+    shuffleBoxArcOffset: 34,
+    shuffleBoxDuration: 0.65,
 
     /** ---- 失败判定 ---- */
     /** 满轨颜色死锁持续该秒数才判负（防补位/收球瞬时误判） */

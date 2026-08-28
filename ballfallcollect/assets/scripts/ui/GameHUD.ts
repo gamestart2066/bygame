@@ -1,4 +1,4 @@
-import { _decorator, Button, Label, Tween, tween, UIOpacity, Vec3 } from 'cc';
+import { _decorator, Button, Label, Node, Tween, tween, UIOpacity, UITransform, Vec3 } from 'cc';
 import { EventBus, GameEvent } from '../core/EventBus';
 import { CFG } from '../core/GameTypes';
 import { LevelManager } from '../config/LevelManager';
@@ -29,6 +29,21 @@ export class GameHUD extends UIPanel {
     @property({ type: Button, tooltip: '暂停按钮（留空则按节点名 BtnPause 自动查找）' })
     public btnPause: Button | null = null;
 
+    @property({ type: Button, tooltip: '清空轨道道具（留空则按节点名 BtnProp1 自动查找）' })
+    public btnClearTrack: Button | null = null;
+
+    @property({ type: Button, tooltip: '收纳箱洗牌道具（留空则按节点名 BtnProp2 自动查找）' })
+    public btnShuffleBoxes: Button | null = null;
+
+    @property({ type: Button, tooltip: '移除 ColorBlock 道具（留空则按节点名 BtnProp3 自动查找）' })
+    public btnRemoveBlock: Button | null = null;
+
+    @property({ type: [Button], tooltip: '道具动画期间统一锁定的按钮（留空则自动查找 BtnProp1~3）' })
+    public propButtons: Button[] = [];
+
+    @property({ type: Node, tooltip: '三个道具按钮的统一父节点（留空则按节点名 PropButtonBar 自动查找）' })
+    public propButtonBar: Node | null = null;
+
     @property({ type: Label, tooltip: '通用飘字字幕（留空则按节点名 SubtitleLabel 自动查找）' })
     public subtitleLabel: Label | null = null;
 
@@ -42,11 +57,16 @@ export class GameHUD extends UIPanel {
             this.subtitleLabel.node.active = false;
         }
         this.btnPause?.node.on(Button.EventType.CLICK, this.onPause, this);
+        this.btnClearTrack?.node.on(Button.EventType.CLICK, this.onClearTrack, this);
+        this.btnShuffleBoxes?.node.on(Button.EventType.CLICK, this.onShuffleBoxes, this);
+        this.btnRemoveBlock?.node.on(Button.EventType.CLICK, this.onRemoveBlock, this);
     }
 
     protected onEnable(): void {
         EventBus.on(GameEvent.ProgressChanged, this.onProgressChanged, this);
         EventBus.on(GameEvent.Subtitle, this.onSubtitle, this);
+        EventBus.on(GameEvent.GameplayInputLocked, this.onGameplayInputLocked, this);
+        EventBus.on(GameEvent.ColorBlockGridBoundsReady, this.onColorBlockGridBoundsReady, this);
         this.refreshLevel();
     }
 
@@ -60,6 +80,12 @@ export class GameHUD extends UIPanel {
      * 避免出现「HUD 一片空白但没有任何报错」。
      */
     private autoBind(): void {
+        if (!this.propButtonBar) {
+            this.propButtonBar = this.node.getChildByName('PropButtonBar');
+        }
+        const findPropButton = (name: string): Button | null =>
+            (this.propButtonBar?.getChildByName(name) ?? this.node.getChildByName(name))
+                ?.getComponent(Button) ?? null;
         if (!this.levelLabel) {
             this.levelLabel = this.node.getChildByName('LevelLabel')?.getComponent(Label) ?? null;
         }
@@ -69,6 +95,20 @@ export class GameHUD extends UIPanel {
         if (!this.btnPause) {
             this.btnPause = this.node.getChildByName('BtnPause')?.getComponent(Button) ?? null;
         }
+        if (!this.btnClearTrack) {
+            this.btnClearTrack = findPropButton('BtnProp1');
+        }
+        if (!this.btnShuffleBoxes) {
+            this.btnShuffleBoxes = findPropButton('BtnProp2');
+        }
+        if (!this.btnRemoveBlock) {
+            this.btnRemoveBlock = findPropButton('BtnProp3');
+        }
+        if (this.propButtons.length === 0) {
+            this.propButtons = ['BtnProp1', 'BtnProp2', 'BtnProp3']
+                .map(findPropButton)
+                .filter((button): button is Button => !!button);
+        }
         if (!this.subtitleLabel) {
             this.subtitleLabel = this.node.getChildByName('SubtitleLabel')?.getComponent(Label) ?? null;
         }
@@ -77,6 +117,9 @@ export class GameHUD extends UIPanel {
         if (!this.levelLabel) missing.push('LevelLabel');
         if (!this.progressLabel) missing.push('ProgressLabel');
         if (!this.btnPause) missing.push('BtnPause(Button)');
+        if (!this.btnClearTrack) missing.push('BtnProp1(Button)');
+        if (!this.btnShuffleBoxes) missing.push('BtnProp2(Button)');
+        if (!this.btnRemoveBlock) missing.push('BtnProp3(Button)');
         if (!this.subtitleLabel) missing.push('SubtitleLabel');
         if (missing.length) {
             console.warn(
@@ -102,6 +145,42 @@ export class GameHUD extends UIPanel {
 
     private onPause(): void {
         UIManager.open('Pause', { fallback: PauseUI });
+    }
+
+    private onClearTrack(): void {
+        EventBus.emit(GameEvent.ClearTrackRequested);
+    }
+
+    private onShuffleBoxes(): void {
+        EventBus.emit(GameEvent.ShuffleBoxesRequested);
+    }
+
+    private onRemoveBlock(): void {
+        EventBus.emit(GameEvent.RemoveColorBlockRequested);
+    }
+
+    private onGameplayInputLocked(payload: { locked?: boolean }): void {
+        const interactable = !payload?.locked;
+        if (this.btnPause) this.btnPause.interactable = interactable;
+        for (const button of this.propButtons) button.interactable = interactable;
+    }
+
+    /** 将道具栏紧靠 7×7 最大网格上沿，并限制在 HUD 屏幕内。 */
+    private onColorBlockGridBoundsReady(payload: { topWorld?: Vec3 }): void {
+        if (!this.propButtonBar || !payload?.topWorld) return;
+        const hudUI = this.getComponent(UITransform);
+        const barUI = this.propButtonBar.getComponent(UITransform);
+        if (!hudUI || !barUI) return;
+
+        const gridTop = hudUI.convertToNodeSpaceAR(payload.topWorld).y;
+        const screenTop = hudUI.contentSize.height * (1 - hudUI.anchorY);
+        const halfBar = barUI.contentSize.height * 0.5;
+        const maxY = screenTop - halfBar;
+        const targetY = Math.min(
+            gridTop + CFG.propButtonBarGridGap + halfBar,
+            maxY,
+        );
+        this.propButtonBar.setPosition(0, targetY, 0);
     }
 
     /** 重复触发时重启同一条字幕，不叠加节点或遗留旧 callback。 */

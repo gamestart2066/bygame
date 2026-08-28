@@ -25,6 +25,16 @@ export enum GameEvent {
     TrackNearFull = 'track-near-full',
     /** 通用飘字字幕，payload: { text: string } */
     Subtitle = 'subtitle',
+    /** HUD 道具按钮请求清空当前轨道 */
+    ClearTrackRequested = 'clear-track-requested',
+    /** HUD 道具按钮请求洗牌收纳箱首排 */
+    ShuffleBoxesRequested = 'shuffle-boxes-requested',
+    /** HUD 道具按钮请求进入 ColorBlock 移除选择模式 */
+    RemoveColorBlockRequested = 'remove-color-block-requested',
+    /** 玩法层临时锁定/恢复玩家输入，payload: { locked: boolean } */
+    GameplayInputLocked = 'gameplay-input-locked',
+    /** 7×7 ColorBlock 最大网格上沿已确定，payload: { topWorld: Vec3 } */
+    ColorBlockGridBoundsReady = 'color-block-grid-bounds-ready',
 
     // ---- 结果 ----
     /** payload: GameResultData */

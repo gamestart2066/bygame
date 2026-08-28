@@ -42,6 +42,12 @@ export class GameManager extends Component {
 
     private _state: GameState = GameState.Ready;
     private _paused: boolean = false;
+    /** 道具动画期间锁定玩家输入与普通入轨/收纳/胜负调度。 */
+    private _powerUpBusy: boolean = false;
+    /** 清轨道期间有箱子完成的列；延迟到全部球到位后再补位。 */
+    private _powerUpDeferredColumns: Set<number> = new Set();
+    /** 移除 ColorBlock 道具当前临时开放选择的格子。 */
+    private _removeSelectionBlocks: ColorBlock[] = [];
     private _plan: LevelPlan | null = null;
     private _def: LevelDef | null = null;
 
@@ -96,6 +102,9 @@ export class GameManager extends Component {
     protected onLoad(): void {
         EventBus.on(GameEvent.GamePause, this.onPause, this);
         EventBus.on(GameEvent.GameResume, this.onResume, this);
+        EventBus.on(GameEvent.ClearTrackRequested, this.clearTrackBalls, this);
+        EventBus.on(GameEvent.ShuffleBoxesRequested, this.shuffleFirstRowBoxes, this);
+        EventBus.on(GameEvent.RemoveColorBlockRequested, this.startRemoveColorBlockSelection, this);
     }
 
     protected onDestroy(): void {
@@ -505,6 +514,9 @@ export class GameManager extends Component {
             vslotNode.destroy();
             return null;
         }
+        EventBus.emit(GameEvent.ColorBlockGridBoundsReady, {
+            topWorld: gridUI.convertToWorldSpaceAR(new Vec3(0, gridHeight, 0)),
+        });
         this._vslot = vslot;
         return {
             terrainName: `Level_${def.levelId}_Grid`,
@@ -779,6 +791,7 @@ export class GameManager extends Component {
 
     /** 点击 ColorBlock 时整批预占 9 个名额，防止快速连点突破场地上限。 */
     private tryReserveColorBlockBatch(): boolean {
+        if (this._powerUpBusy) return false;
         const max = CFG.ballsPerBlock * CFG.maxUntrackedBallBatches;
         if (this._untrackedBallCount + CFG.ballsPerBlock > max) {
             EventBus.emit(GameEvent.Subtitle, { text: '小球太多了' });
@@ -898,6 +911,27 @@ export class GameManager extends Component {
             if (!box.node.active) box.node.active = true;
             box.moveTo(new Vec3(x, this.rowY(row), 0), animated);
         }
+
+        this.refreshBoxRenderOrder();
+    }
+
+    /**
+     * BoxLayer 按行维护稳定遮挡关系：托盘在最底，第一行箱子最低，后续行依次在上。
+     * 洗牌只交换逻辑行与坐标，Tween 完成后仍由当前行号决定最终显示层级。
+     */
+    private refreshBoxRenderOrder(): void {
+        let siblingIndex = 1; // CollectBoxDock 固定为 0。
+        const rowCount = this._columns.reduce(
+            (max, column) => Math.max(max, column.length),
+            0,
+        );
+        for (let row = 0; row < rowCount; row++) {
+            for (const column of this._columns) {
+                const box = column[row];
+                if (!box?.isValid || box.node.parent !== this._boxLayer) continue;
+                box.node.setSiblingIndex(siblingIndex++);
+            }
+        }
     }
 
     private onBoxFinished(box: CollectBox): void {
@@ -909,7 +943,8 @@ export class GameManager extends Component {
         if (list) {
             const i = list.indexOf(box);
             if (i >= 0) list.splice(i, 1);
-            this.refreshColumn(col, true);
+            if (this._powerUpBusy) this._powerUpDeferredColumns.add(col);
+            else this.refreshColumn(col, true);
         }
         EventBus.emit(GameEvent.BoxFinished, { color: box.colorId });
     }
@@ -920,6 +955,19 @@ export class GameManager extends Component {
         for (const list of this._columns) {
             const box = list && list[0];
             if (box && box.isValid) out.push(box);
+        }
+        return out;
+    }
+
+    /** 道具选箱顺序：先从左到右遍历同一行，再进入下一行。 */
+    private getBoxesRowMajor(): CollectBox[] {
+        const out: CollectBox[] = [];
+        const rowCount = this._columns.reduce((max, column) => Math.max(max, column.length), 0);
+        for (let row = 0; row < rowCount; row++) {
+            for (const column of this._columns) {
+                const box = column[row];
+                if (box?.isValid) out.push(box);
+            }
         }
         return out;
     }
@@ -956,12 +1004,258 @@ export class GameManager extends Component {
         PhysicsSystem2D.instance.enable = true;
     }
 
+    /**
+     * 清轨道道具：先为所有占槽球跨行预订同色收纳槽，全部成功后再统一释放轨道。
+     */
+    public clearTrackBalls(): boolean {
+        if (this._state !== GameState.Playing || this._paused || this._powerUpBusy || !this._track) {
+            return false;
+        }
+        const balls = this._track.getOccupiedBalls();
+        if (balls.length === 0) {
+            EventBus.emit(GameEvent.Subtitle, { text: '轨道上没有小球' });
+            return false;
+        }
+
+        // 先终止可能正在进行的列补位 Tween 并落定，确保批量飞入目标不移动。
+        for (let col = 0; col < this._columns.length; col++) this.refreshColumn(col, false);
+        this._powerUpDeferredColumns.clear();
+
+        const plans: Array<{ ball: Ball; box: CollectBox; targetWorld: Vec3 }> = [];
+        const boxesByPriority = this.getBoxesRowMajor();
+        for (const ball of balls) {
+            let reserved: { box: CollectBox; targetWorld: Vec3 } | null = null;
+            for (const box of boxesByPriority) {
+                const targetWorld = box.reservePowerUpSlot(ball.colorId);
+                if (!targetWorld) continue;
+                reserved = { box, targetWorld };
+                break;
+            }
+            if (!reserved) {
+                for (const plan of plans) plan.box.cancelPowerUpReservation();
+                EventBus.emit(GameEvent.Subtitle, { text: '暂无足够的同色收纳槽' });
+                return false;
+            }
+            plans.push({ ball, ...reserved });
+        }
+
+        this._powerUpBusy = true;
+        EventBus.emit(GameEvent.GameplayInputLocked, { locked: true });
+        let remaining = plans.length;
+        for (let i = 0; i < plans.length; i++) {
+            const { ball, box, targetWorld } = plans[i];
+            const parentUI = ball.node.parent?.getComponent(UITransform) ?? this._ballLayerUI;
+            const targetLocal = parentUI ? parentUI.convertToNodeSpaceAR(targetWorld) : targetWorld;
+            this._track.releaseSlot(ball.slotIndex);
+            ball.flyToBoxByPowerUp(targetLocal, i, () => {
+                if (box.isValid) box.addBall();
+                this._collected++;
+                EventBus.emit(GameEvent.BallCollected, { color: ball.colorId });
+                remaining--;
+                this.emitProgress();
+                if (remaining === 0) this.finishClearTrackPowerUp();
+            });
+        }
+        this.emitProgress();
+        return true;
+    }
+
+    private finishClearTrackPowerUp(): void {
+        this._powerUpBusy = false;
+        for (const col of this._powerUpDeferredColumns) this.refreshColumn(col, true);
+        this._powerUpDeferredColumns.clear();
+        EventBus.emit(GameEvent.GameplayInputLocked, { locked: false });
+        EventBus.emit(GameEvent.Subtitle, { text: '轨道已清空' });
+    }
+
+    /**
+     * 洗牌道具：每列从第 2~4 行的现存箱子中随机选一个，与该列第一行交换。
+     */
+    public shuffleFirstRowBoxes(): boolean {
+        if (this._state !== GameState.Playing || this._paused || this._powerUpBusy) return false;
+        const activeBoxes = this._boxes.filter((box) => box?.isValid);
+        if (activeBoxes.some((box) => box.isFinished() || !box.isStableForShuffle())) {
+            EventBus.emit(GameEvent.Subtitle, { text: '收纳箱正在移动' });
+            return false;
+        }
+
+        const swaps: Array<{
+            col: number;
+            row: number;
+            first: CollectBox;
+            selected: CollectBox;
+        }> = [];
+        for (let col = 0; col < this._columns.length; col++) {
+            const list = this._columns[col];
+            const candidateCount = Math.min(3, Math.max(0, list.length - 1));
+            if (candidateCount <= 0) continue;
+            const row = 1 + Math.floor(Math.random() * candidateCount);
+            const first = list[0];
+            const selected = list[row];
+            if (!first?.isValid || !selected?.isValid) continue;
+            swaps.push({ col, row, first, selected });
+        }
+        if (swaps.length === 0) {
+            EventBus.emit(GameEvent.Subtitle, { text: '没有可洗牌的后排收纳箱' });
+            return false;
+        }
+
+        this._powerUpBusy = true;
+        EventBus.emit(GameEvent.GameplayInputLocked, { locked: true });
+        let remaining = swaps.length * 2;
+        const completedColumns = new Set<number>();
+        const onOneDone = (col: number): void => {
+            remaining--;
+            completedColumns.add(col);
+            if (remaining > 0) return;
+            for (const completedCol of completedColumns) this.refreshColumn(completedCol, false);
+            this._powerUpBusy = false;
+            EventBus.emit(GameEvent.GameplayInputLocked, { locked: false });
+            EventBus.emit(GameEvent.Subtitle, { text: '收纳箱已洗牌' });
+        };
+
+        for (const { col, row, first, selected } of swaps) {
+            const list = this._columns[col];
+            list[0] = selected;
+            list[row] = first;
+            first.setCollectable(false);
+            selected.setCollectable(false);
+            first.shuffleTo(
+                new Vec3(this.columnX(col), this.rowY(row), 0),
+                -1,
+                () => onOneDone(col),
+            );
+            selected.shuffleTo(
+                new Vec3(this.columnX(col), this.rowY(0), 0),
+                1,
+                () => onOneDone(col),
+            );
+        }
+        return true;
+    }
+
+    /** 进入 ColorBlock 移除选择模式；Boxes 容器和尚未派发格子不参与。 */
+    public startRemoveColorBlockSelection(): boolean {
+        if (this._state !== GameState.Playing || this._paused || this._powerUpBusy) return false;
+        const activeBoxes = this._boxes.filter((box) => box?.isValid);
+        if (activeBoxes.some((box) => box.isFinished() || !box.isStableForShuffle())) {
+            EventBus.emit(GameEvent.Subtitle, { text: '收纳箱正在移动' });
+            return false;
+        }
+
+        const selectable = this._blocks.filter((block) => block?.canSelectForRemovePowerUp());
+        if (selectable.length === 0) {
+            EventBus.emit(GameEvent.Subtitle, { text: '没有可移除的色块' });
+            return false;
+        }
+
+        this._powerUpBusy = true;
+        this._powerUpDeferredColumns.clear();
+        this._removeSelectionBlocks.length = 0;
+        EventBus.emit(GameEvent.GameplayInputLocked, { locked: true });
+        for (const block of selectable) {
+            if (block.beginRemovePowerUpSelection((selected) => {
+                this.onRemoveColorBlockSelected(selected);
+            })) {
+                this._removeSelectionBlocks.push(block);
+            }
+        }
+        if (this._removeSelectionBlocks.length === 0) {
+            this.finishRemoveColorBlockPowerUp('没有可移除的色块', true);
+            return false;
+        }
+        EventBus.emit(GameEvent.Subtitle, { text: '请选择要移除的色块' });
+        return true;
+    }
+
+    private onRemoveColorBlockSelected(selected: ColorBlock): void {
+        if (!this._powerUpBusy || !this._removeSelectionBlocks.includes(selected)) return;
+        const origins = selected.getRemovePowerUpOrigins();
+        if (origins.length !== CFG.ballsPerBlock || !this._trackBallLayer) {
+            this.finishRemoveColorBlockPowerUp('色块 Slot 结构不完整', true);
+            return;
+        }
+
+        const boxesByPriority = this.getBoxesRowMajor();
+        const reservations: Array<{ box: CollectBox; targetWorld: Vec3 }> = [];
+        for (let i = 0; i < CFG.ballsPerBlock; i++) {
+            let reserved: { box: CollectBox; targetWorld: Vec3 } | null = null;
+            for (const box of boxesByPriority) {
+                const targetWorld = box.reservePowerUpSlot(selected.colorId);
+                if (!targetWorld) continue;
+                reserved = { box, targetWorld };
+                break;
+            }
+            if (!reserved) {
+                for (const item of reservations) item.box.cancelPowerUpReservation();
+                this.finishRemoveColorBlockPowerUp('暂无足够的同色收纳槽', true);
+                return;
+            }
+            reservations.push(reserved);
+        }
+
+        const parent = this._trackBallLayer;
+        const parentUI = parent.getComponent(UITransform);
+        const spawned: Ball[] = [];
+        for (let i = 0; i < origins.length; i++) {
+            const spawnLocal = parentUI ? parentUI.convertToNodeSpaceAR(origins[i]) : origins[i];
+            const ball = this._ballPool.get(selected.colorId, spawnLocal, parent);
+            if (!ball) {
+                for (const acquired of spawned) this._ballPool.recycle(acquired);
+                for (const item of reservations) item.box.cancelPowerUpReservation();
+                this.finishRemoveColorBlockPowerUp('Ball Pool 获取失败', true);
+                return;
+            }
+            spawned.push(ball);
+        }
+
+        for (const block of this._removeSelectionBlocks) {
+            block.endRemovePowerUpSelection(block !== selected);
+        }
+        this._removeSelectionBlocks.length = 0;
+        selected.consumeByRemovePowerUp();
+        const selectedIndex = this._blocks.indexOf(selected);
+        if (selectedIndex >= 0) this.onColorBlockActivated(selectedIndex);
+        selected.playDepleteAndHide();
+        this._balls.push(...spawned);
+
+        let remaining = spawned.length;
+        for (let i = 0; i < spawned.length; i++) {
+            const ball = spawned[i];
+            const { box, targetWorld } = reservations[i];
+            const targetLocal = parentUI ? parentUI.convertToNodeSpaceAR(targetWorld) : targetWorld;
+            ball.flyToBoxByPowerUp(targetLocal, i, () => {
+                if (box.isValid) box.addBall();
+                this._collected++;
+                EventBus.emit(GameEvent.BallCollected, { color: ball.colorId });
+                remaining--;
+                this.emitProgress();
+                if (remaining === 0) this.finishRemoveColorBlockPowerUp('色块已移除', false);
+            });
+        }
+    }
+
+    private finishRemoveColorBlockPowerUp(message: string, restoreSelection: boolean): void {
+        if (restoreSelection) {
+            for (const block of this._removeSelectionBlocks) {
+                if (block?.isValid) block.endRemovePowerUpSelection(true);
+            }
+        }
+        this._removeSelectionBlocks.length = 0;
+        this._powerUpBusy = false;
+        for (const col of this._powerUpDeferredColumns) this.refreshColumn(col, true);
+        this._powerUpDeferredColumns.clear();
+        EventBus.emit(GameEvent.GameplayInputLocked, { locked: false });
+        EventBus.emit(GameEvent.Subtitle, { text: message });
+    }
+
     // ==================== 每帧调度 ====================
 
     protected update(dt: number): void {
         if (this._state !== GameState.Playing || this._paused) return;
 
         this.pruneBalls();
+        if (this._powerUpBusy) return;
         this.updateAllBlocksSpeedBoost();
         this.handleEntry(dt);
         this.handleCollect();

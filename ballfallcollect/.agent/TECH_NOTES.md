@@ -231,6 +231,9 @@ ColorBlockGrid [UITransform anchor=(0.5,0)]  ← 运行时节点
 - `blockColor` 格式为 `[path排序累计百分比上限, [最小颜色id, 最大颜色id]]`，各上限必须严格递增且最后为 100；每段下限由上一段自动推导，按 path 稳定排序生成颜色后映射回原索引
 - `CFG.debugShowColorBlockPath` 默认关闭；临时开启后运行时显示带黑色描边的 `P1/P2/...`，不得依赖该调试节点承载玩法逻辑
 - 收纳箱 `flat` 必须按 path 排序后的 `blockColors` 从后向前展开（每格重复 `ballsPerBlock/boxCapacity` 次），再依 `boxShuffleSegments` 分段洗牌。段顺序不得交叉，同一 seed 必须可复现
+- 清轨道道具通过 `GameEvent.ClearTrackRequested` 触发 `GameManager.clearTrackBalls()`；必须先以“行优先、同行从左到右”的顺序为全部占槽 Ball 预订同色 CollectBox 槽位，任一失败则回滚全部预订且不释放轨道。道具可忽略首排、补位和距离判定，不得忽略颜色、容量或 `_reserved`；启动时先落定各列箱子，飞入期间延迟完成列的补位，所有球到位后再恢复列动画与玩家输入
+- 收纳箱洗牌道具通过 `ShuffleBoxesRequested` 触发 `GameManager.shuffleFirstRowBoxes()`；每列只从数组索引 `1..min(3, length-1)`（可视第 2~4 行）随机选择一箱与索引 0 交换。启动前所有箱子必须已落位、无预订球且未进入完成动画；交换期间复用 `_powerUpBusy` 与 `GameplayInputLocked`
+- ColorBlock 移除道具通过 `RemoveColorBlockRequested` 触发 `startRemoveColorBlockSelection()`；只允许选择已在场、未点击、未释放且仍持有完整 `ballsPerBlock` 的 ColorBlock。选择期 Unknown 真实色与锁定 Lid 只是临时视觉，未选中格必须恢复原 `_typeRevealed/_clickEnabled`状态；选中格 9 球先按行优先原子预订同色箱槽，再从 BallPool 一次性获取并从各 Slot 世界坐标直飞入箱；任一预订或 Pool 获取失败必须全量回滚
 - 轨道的 `_slots` 仍是唯一逻辑占用表；每个索引固定对应一个 `BallSlot.prefab` 实例，实例只负责固定槽位表现并全程显示，随弧长位置逐帧移动，不跟随占用状态显隐，禁止把 Prefab 节点作为逻辑占用来源。
 - ColorBlock 耗尽回调由 `GameManager.onColorBlockDepleted()` 统一调用 `playDepleteAndHide()`：根节点缩小后隐藏，normal/unknown/boxes 派发格子不得分叉保留 Background
 - 外部布局所有行等长、最大 7×7 且列数必须为奇数，保证中心列与固定 7 列可视网格 / Startgridpos 对齐；小布局在固定 7×7 中底部对齐、水平居中。所有非空 ColorBlock/Boxes 由单一 `GridCarrier/Graphics` 承托：先把非空单元、正交连接桥和四格交点展开为交替 block/gap 尺寸的微网格，再提取整个连通区域的闭合外轮廓；阴影、外沿、主体和高光只沿该轮廓绘制，内部不存在独立单元的抗锯齿边缘或 Sprite 接缝，空白区域直接露出玩法背景。所有非空节点必须通过上下左右相邻形成一个连通块，最底行至少有一个 normal ColorBlock

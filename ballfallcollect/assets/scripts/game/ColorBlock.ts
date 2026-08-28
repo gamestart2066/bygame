@@ -60,6 +60,10 @@ export class ColorBlock extends Component {
     private _onActivated: ((blockIndex: number) => void) | null = null;
     private _onDepleted: ((blockIndex: number) => void) | null = null;
     private _canActivate: (() => boolean) | null = null;
+    /** 移除道具选择态；此时触摸绕过普通解锁/释放入口。 */
+    private _removeSelectionActive: boolean = false;
+    private _removeSelectionWasRevealed: boolean = true;
+    private _onRemoveSelected: ((block: ColorBlock) => void) | null = null;
 
     /**
      * 由 GameManager 在扫描到本格子后调用，分配颜色并激活。
@@ -163,7 +167,103 @@ export class ColorBlock extends Component {
     }
 
     private onTouch(_e: EventTouch): void {
+        if (this._removeSelectionActive) {
+            this._onRemoveSelected?.(this);
+            return;
+        }
         this.startRelease();
+    }
+
+    /** 只有当前在场、未点击且仍持有完整一批球的格子可被移除道具选中。 */
+    public canSelectForRemovePowerUp(): boolean {
+        return this._initialized
+            && this.node.isValid
+            && this.node.active
+            && !this._hasBeenClicked
+            && !this._releasing
+            && this.remaining === CFG.ballsPerBlock;
+    }
+
+    /** 临时揭示 Unknown 并使用现有 Lid 缩小动画进入选择态。 */
+    public beginRemovePowerUpSelection(onSelected: (block: ColorBlock) => void): boolean {
+        if (!this.canSelectForRemovePowerUp()) return false;
+        this._removeSelectionActive = true;
+        this._removeSelectionWasRevealed = this._typeRevealed;
+        this._onRemoveSelected = onSelected;
+        if (!this._typeRevealed) {
+            this._typeRevealed = true;
+            if (this._unknown) this._unknown.active = false;
+            if (this._slotsRoot) this._slotsRoot.active = true;
+            this.redrawBackground();
+            this.redrawDots();
+            this.redrawLidColor();
+        }
+        this.playRemoveSelectionLidTween();
+        return true;
+    }
+
+    /** 退出选择态；未选中格子完整恢复 Unknown/锁定前的视觉。 */
+    public endRemovePowerUpSelection(restore: boolean): void {
+        this._removeSelectionActive = false;
+        this._onRemoveSelected = null;
+        if (this._lid) Tween.stopAllByTarget(this._lid);
+        if (!restore) {
+            if (this._lid) {
+                this._lid.active = false;
+                this._lid.setScale(this._lidBaseScale);
+            }
+            return;
+        }
+        this._typeRevealed = this._removeSelectionWasRevealed;
+        this.node.setScale(this._baseScale);
+        this.redraw();
+        if (this._lid) {
+            this._lid.setScale(this._lidBaseScale);
+            this._lid.active = !this._clickEnabled;
+        }
+    }
+
+    private playRemoveSelectionLidTween(): void {
+        if (!this._lid) return;
+        if (this._clickEnabled && !this._lid.active) return;
+        Tween.stopAllByTarget(this._lid);
+        this.redrawLidColor();
+        this._lid.setScale(this._lidBaseScale);
+        this._lid.active = true;
+        tween(this._lid)
+            .to(CFG.colorBlockLidHideDuration, {
+                scale: new Vec3(0, 0, this._lidBaseScale.z),
+            }, { easing: 'quadIn' })
+            .call(() => {
+                if (!this._lid?.isValid || !this._removeSelectionActive) return;
+                this._lid.active = false;
+                this._lid.setScale(this._lidBaseScale);
+            })
+            .start();
+    }
+
+    /** 返回完整 9 个展示 Slot 的世界坐标，供移除道具实体化 Ball。 */
+    public getRemovePowerUpOrigins(): Vec3[] {
+        const out: Vec3[] = [];
+        for (let i = 0; i < Math.min(CFG.ballsPerBlock, this._slotNodes.length); i++) {
+            out.push(this.getSlotWorldPos(i));
+        }
+        return out;
+    }
+
+    /** 选中格逻辑耗尽：停止全部 Slot 任务并隐藏展示球。 */
+    public consumeByRemovePowerUp(): void {
+        this.unscheduleAllCallbacks();
+        this._releaseToken++;
+        this._removeSelectionActive = false;
+        this._onRemoveSelected = null;
+        this._hasBeenClicked = true;
+        this._releasing = false;
+        this._pendingReleases = 0;
+        this._nextSlotIndex = -1;
+        this.remaining = 0;
+        for (let i = 0; i < this._slotNodes.length; i++) this.restoreSlot(i, false);
+        this.redrawBackground();
     }
 
     /** 开始释放：逐球间隔投放，避免同帧重叠导致物理爆炸 */
@@ -502,6 +602,8 @@ export class ColorBlock extends Component {
         this._onActivated = null;
         this._canActivate = null;
         this._onDepleted = null;
+        this._removeSelectionActive = false;
+        this._onRemoveSelected = null;
         for (let i = 0; i < this._slotNodes.length; i++) {
             this.restoreSlot(i, i < this.remaining);
         }
@@ -520,6 +622,8 @@ export class ColorBlock extends Component {
         this._onActivated = null;
         this._canActivate = null;
         this._onDepleted = null;
+        this._removeSelectionActive = false;
+        this._onRemoveSelected = null;
         this.node.off(Node.EventType.TOUCH_END, this.onTouch, this);
     }
 }

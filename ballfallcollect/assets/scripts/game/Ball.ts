@@ -174,6 +174,59 @@ export class Ball extends Component {
             .start();
     }
 
+    /** 清轨道道具专用：错峰弹起、视觉放大，再沿夸张弧线飞入收纳槽。 */
+    public flyToBoxByPowerUp(targetPos: Vec3, order: number, onArrive: () => void): void {
+        if (this._recycled || this.state === BallState.Collecting) return;
+        const token = this._lifecycleToken;
+        const startPos = this.node.position.clone();
+        const outward = startPos.x < 0 ? -CFG.clearTrackBurstOutward : CFG.clearTrackBurstOutward;
+        const burstPos = new Vec3(
+            startPos.x + outward,
+            startPos.y + CFG.clearTrackBurstHeight,
+            startPos.z,
+        );
+        const apexPos = new Vec3(
+            (burstPos.x + targetPos.x) * 0.5,
+            Math.max(burstPos.y, targetPos.y) + CFG.clearTrackBurstHeight,
+            targetPos.z,
+        );
+        const delay = Math.max(0, order) * CFG.clearTrackBallStagger;
+        const flyHalf = CFG.clearTrackFlyDuration * 0.5;
+        this.state = BallState.Collecting;
+        this.slotIndex = -1;
+        this.disablePhysics();
+        Tween.stopAllByTarget(this.node);
+        if (this._view) Tween.stopAllByTarget(this._view);
+
+        tween(this.node)
+            .delay(delay)
+            .to(CFG.clearTrackBurstDuration, { position: burstPos }, { easing: 'backOut' })
+            .to(flyHalf, { position: apexPos }, { easing: 'quadOut' })
+            .to(CFG.clearTrackFlyDuration - flyHalf, { position: targetPos }, { easing: 'quadIn' })
+            .call(() => {
+                if (!this.isCurrent(token)) return;
+                this.state = BallState.Collected;
+                onArrive();
+                if (this.isCurrent(token)) this.requestRecycle();
+            })
+            .start();
+
+        if (this._view) {
+            const standardScale = new Vec3(CFG.ballVisualScale, CFG.ballVisualScale, 1);
+            tween(this._view)
+                .delay(delay)
+                .to(CFG.clearTrackBurstDuration, {
+                    scale: new Vec3(
+                        CFG.ballVisualScale * CFG.clearTrackVisualScale,
+                        CFG.ballVisualScale * CFG.clearTrackVisualScale,
+                        1,
+                    ),
+                }, { easing: 'backOut' })
+                .to(CFG.clearTrackFlyDuration, { scale: standardScale }, { easing: 'sineInOut' })
+                .start();
+        }
+    }
+
     /** Pool 回收前深度清理所有可跨生命周期的状态。 */
     public resetForPool(): void {
         this.stopAsyncWork();
