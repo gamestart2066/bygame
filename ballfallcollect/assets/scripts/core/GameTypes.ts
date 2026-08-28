@@ -93,6 +93,15 @@ export const CFG = {
     colorBlockGridGap: 5,
     /** HUD 道具栏底边与 7×7 最大 ColorBlock 网格上沿的间距 */
     propButtonBarGridGap: 20,
+    /** 道具栏自然高度、顶部安全间距及紧凑模式最小缩放 */
+    propButtonBarNaturalHeight: 100,
+    propButtonBarScreenTopMargin: 12,
+    propButtonBarMinScale: 0.8,
+    propButtonBarButtonSpacing: 110,
+    propButtonBarSideGap: 12,
+    /** 完整玩法内容的纵向设计需求；不足时 GameContentRoot 统一缩放 */
+    gameContentRequiredHeight: 1480,
+    gameContentMinScale: 0.78,
     /** 临时调试：在 ColorBlock 上显示最短解锁 path；正式运行默认关闭 */
     debugShowColorBlockPath: false,
     /** ColorBlock 解锁时根节点脉冲倍率与总时长 */

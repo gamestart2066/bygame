@@ -33,7 +33,7 @@ export enum GameEvent {
     RemoveColorBlockRequested = 'remove-color-block-requested',
     /** 玩法层临时锁定/恢复玩家输入，payload: { locked: boolean } */
     GameplayInputLocked = 'gameplay-input-locked',
-    /** 7×7 ColorBlock 最大网格上沿已确定，payload: { topWorld: Vec3 } */
+    /** 7×7 ColorBlock 最大网格边界已确定，payload: { topWorld, bottomWorld, rightWorld } */
     ColorBlockGridBoundsReady = 'color-block-grid-bounds-ready',
 
     // ---- 结果 ----

@@ -165,8 +165,12 @@ export class GameHUD extends UIPanel {
         for (const button of this.propButtons) button.interactable = interactable;
     }
 
-    /** 将道具栏紧靠 7×7 最大网格上沿，并限制在 HUD 屏幕内。 */
-    private onColorBlockGridBoundsReady(payload: { topWorld?: Vec3 }): void {
+    /** 紧靠最大网格；纵向空间不足时将道具栏缩至配置下限。 */
+    private onColorBlockGridBoundsReady(payload: {
+        topWorld?: Vec3;
+        bottomWorld?: Vec3;
+        rightWorld?: Vec3;
+    }): void {
         if (!this.propButtonBar || !payload?.topWorld) return;
         const hudUI = this.getComponent(UITransform);
         const barUI = this.propButtonBar.getComponent(UITransform);
@@ -175,12 +179,79 @@ export class GameHUD extends UIPanel {
         const gridTop = hudUI.convertToNodeSpaceAR(payload.topWorld).y;
         const screenTop = hudUI.contentSize.height * (1 - hudUI.anchorY);
         const halfBar = barUI.contentSize.height * 0.5;
-        const maxY = screenTop - halfBar;
+        const availableHeight = screenTop
+            - CFG.propButtonBarScreenTopMargin
+            - CFG.propButtonBarGridGap
+            - gridTop;
+        const minimumBarHeight = CFG.propButtonBarNaturalHeight * CFG.propButtonBarMinScale;
+        if (availableHeight < minimumBarHeight && payload.bottomWorld && payload.rightWorld) {
+            this.layoutPropButtonBarAtGridSide(payload, hudUI, barUI);
+            return;
+        }
+
+        barUI.setContentSize(
+            CFG.propButtonBarButtonSpacing * 2 + CFG.propButtonBarNaturalHeight,
+            CFG.propButtonBarNaturalHeight,
+        );
+        this.layoutPropButtonChildren(false);
+        const barScale = Math.min(
+            1,
+            Math.max(CFG.propButtonBarMinScale, availableHeight / barUI.contentSize.height),
+        );
+        this.propButtonBar.setScale(barScale, barScale, 1);
+
+        const scaledHalfBar = halfBar * barScale;
+        const maxY = screenTop - CFG.propButtonBarScreenTopMargin - scaledHalfBar;
         const targetY = Math.min(
-            gridTop + CFG.propButtonBarGridGap + halfBar,
+            gridTop + CFG.propButtonBarGridGap + scaledHalfBar,
             maxY,
         );
         this.propButtonBar.setPosition(0, targetY, 0);
+    }
+
+    /** 极端宽屏纵向不足时，利用网格右侧横向空间竖排三个道具。 */
+    private layoutPropButtonBarAtGridSide(
+        payload: { topWorld?: Vec3; bottomWorld?: Vec3; rightWorld?: Vec3 },
+        hudUI: UITransform,
+        barUI: UITransform,
+    ): void {
+        if (!this.propButtonBar || !payload.topWorld || !payload.bottomWorld || !payload.rightWorld) return;
+        const spacing = CFG.propButtonBarButtonSpacing;
+        barUI.setContentSize(CFG.propButtonBarNaturalHeight, spacing * 2 + CFG.propButtonBarNaturalHeight);
+        this.layoutPropButtonChildren(true);
+        this.propButtonBar.setScale(CFG.propButtonBarMinScale, CFG.propButtonBarMinScale, 1);
+
+        const gridTop = hudUI.convertToNodeSpaceAR(payload.topWorld);
+        const gridBottom = hudUI.convertToNodeSpaceAR(payload.bottomWorld);
+        const gridRight = hudUI.convertToNodeSpaceAR(payload.rightWorld).x;
+        const screenRight = hudUI.contentSize.width * (1 - hudUI.anchorX);
+        const screenTop = hudUI.contentSize.height * (1 - hudUI.anchorY);
+        const screenBottom = -hudUI.contentSize.height * hudUI.anchorY;
+        const halfWidth = barUI.contentSize.width * CFG.propButtonBarMinScale * 0.5;
+        const halfHeight = barUI.contentSize.height * CFG.propButtonBarMinScale * 0.5;
+        const x = Math.min(
+            gridRight + CFG.propButtonBarSideGap + halfWidth,
+            screenRight - CFG.propButtonBarScreenTopMargin - halfWidth,
+        );
+        const y = Math.max(
+            screenBottom + CFG.propButtonBarScreenTopMargin + halfHeight,
+            Math.min(
+                (gridTop.y + gridBottom.y) * 0.5,
+                screenTop - CFG.propButtonBarScreenTopMargin - halfHeight,
+            ),
+        );
+        this.propButtonBar.setPosition(x, y, 0);
+    }
+
+    private layoutPropButtonChildren(vertical: boolean): void {
+        const nodes = [this.btnClearTrack?.node, this.btnShuffleBoxes?.node, this.btnRemoveBlock?.node];
+        const spacing = CFG.propButtonBarButtonSpacing;
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+            if (!node) continue;
+            const offset = (i - 1) * spacing;
+            node.setPosition(vertical ? 0 : offset, vertical ? -offset : 0, 0);
+        }
     }
 
     /** 重复触发时重启同一条字幕，不叠加节点或遗留旧 callback。 */

@@ -73,11 +73,19 @@ export class GameManager extends Component {
     private _ballPool: BallPool = new BallPool();
     private _ballSlotPrefab: Prefab | null = null;
     private _collectBoxPrefab: Prefab | null = null;
+    /** 等关卡进入 Playing 后下一帧再通知 HUD，避免异步 onLoad 期间事件先于 onEnable。 */
+    private _gridLayoutBounds: {
+        topWorld: Vec3;
+        bottomWorld: Vec3;
+        rightWorld: Vec3;
+    } | null = null;
     private _colorBlockPrefab: Prefab | null = null;
     private _colorBlockBoxesPrefab: Prefab | null = null;
     private _vslotPrefab: Prefab | null = null;
 
     private _terrainLayer: Node | null = null;
+    /** 除全屏 UI 外的统一玩法缩放根节点；Scale 只在创建刚体前设置一次。 */
+    private _gameContentRoot: Node | null = null;
     private _boxLayer: Node | null = null;
     private _ballLayer: Node | null = null;
     private _ballLayerUI: UITransform | null = null;
@@ -125,6 +133,7 @@ export class GameManager extends Component {
      * 因为地形需要异步加载）。
      */
     public async startLevel(): Promise<boolean> {
+        this._gridLayoutBounds = null;
         const gridAsset = await ResManager.load(ResPaths.levelGrids, JsonAsset);
         const layoutAsset = await ResManager.load(ResPaths.levelLayouts, JsonAsset);
         if (!gridAsset || !layoutAsset || !installLevelConfig(gridAsset.json, layoutAsset.json)) {
@@ -212,7 +221,11 @@ export class GameManager extends Component {
 
         // 3. 构建运行时对象
         this._entryCenter = this.resolveEntryPos();
-        this._track = TrackSystem.create(this.node, this._entryCenter, this._ballSlotPrefab);
+        this._track = TrackSystem.create(
+            this._gameContentRoot ?? this.node,
+            this._entryCenter,
+            this._ballSlotPrefab,
+        );
         // Track 是在各层之后才创建的（要等地形算出入口），
         // 必须手动下沉到 TerrainLayer 的位置，否则轨道图形会盖住球与箱子。
         const trackIndex = this._terrainLayer ? this._terrainLayer.getSiblingIndex() : 0;
@@ -236,6 +249,11 @@ export class GameManager extends Component {
         this._state = GameState.Playing;
         EventBus.emit(GameEvent.LevelLoaded, { levelId: def.levelId });
         this.emitProgress();
+        this.scheduleOnce(() => {
+            if (this._state === GameState.Playing && this._gridLayoutBounds) {
+                EventBus.emit(GameEvent.ColorBlockGridBoundsReady, this._gridLayoutBounds);
+            }
+        }, 0);
         return true;
     }
 
@@ -244,7 +262,7 @@ export class GameManager extends Component {
         if (!CFG.debugDrawTrackEntryZone) return;
         const node = new Node('TrackEntryDebugZone');
         node.addComponent(UITransform);
-        node.setParent(this.node);
+        node.setParent(this._gameContentRoot ?? this.node);
         node.setPosition(this._entryCenter);
         const graphics = node.addComponent(Graphics);
         graphics.lineWidth = 3;
@@ -265,7 +283,7 @@ export class GameManager extends Component {
         if (!CFG.debugDrawEntranceAntiJamZone) return;
         const node = new Node('EntranceAntiJamDebugZone');
         node.addComponent(UITransform);
-        node.setParent(this.node);
+        node.setParent(this._gameContentRoot ?? this.node);
         node.setPosition(this._entryCenter);
         const graphics = node.addComponent(Graphics);
         graphics.lineWidth = 3;
@@ -296,11 +314,31 @@ export class GameManager extends Component {
      * TrackBallLayer 保证跳入/在轨/入箱的小球盖住仍在 V 槽等待的小球。
      */
     private buildLayers(): void {
+        const canvasUI = this.getComponent(UITransform);
+        this._gameContentRoot = new Node('GameContentRoot');
+        const contentUI = this._gameContentRoot.addComponent(UITransform);
+        this._gameContentRoot.setParent(this.node);
+        if (canvasUI) {
+            contentUI.setContentSize(canvasUI.contentSize);
+            contentUI.setAnchorPoint(canvasUI.anchorPoint);
+            const scale = Math.min(
+                1,
+                Math.max(
+                    CFG.gameContentMinScale,
+                    canvasUI.contentSize.height / CFG.gameContentRequiredHeight,
+                ),
+            );
+            const screenBottom = -canvasUI.contentSize.height * canvasUI.anchorY;
+            // 以屏幕底边为缩放支点：rootY + scale * screenBottom === screenBottom。
+            this._gameContentRoot.setPosition(0, screenBottom * (1 - scale), 0);
+            this._gameContentRoot.setScale(scale, scale, 1);
+        }
+
+        const contentParent = this._gameContentRoot;
         if (this.autoCreateWalls) {
             const sysLayer = new Node('SystemStatic');
             const sysUI = sysLayer.addComponent(UITransform);
-            sysLayer.setParent(this.node);
-            const canvasUI = this.getComponent(UITransform);
+            sysLayer.setParent(contentParent);
             if (canvasUI) {
                 sysUI.setContentSize(canvasUI.contentSize);
                 sysUI.setAnchorPoint(canvasUI.anchorPoint);
@@ -310,22 +348,22 @@ export class GameManager extends Component {
 
         this._terrainLayer = new Node('TerrainLayer');
         this._terrainLayer.addComponent(UITransform);
-        this._terrainLayer.setParent(this.node);
+        this._terrainLayer.setParent(contentParent);
         this._terrainLayer.setPosition(0, 0, 0);
 
         this._boxLayer = new Node('BoxLayer');
         this._boxLayer.addComponent(UITransform);
-        this._boxLayer.setParent(this.node);
+        this._boxLayer.setParent(contentParent);
         this._boxLayer.setPosition(0, 0, 0);
 
         this._ballLayer = new Node('BallLayer');
         this._ballLayerUI = this._ballLayer.addComponent(UITransform);
-        this._ballLayer.setParent(this.node);
+        this._ballLayer.setParent(contentParent);
         this._ballLayer.setPosition(0, 0, 0);
 
         this._trackBallLayer = new Node('TrackBallLayer');
         this._trackBallLayer.addComponent(UITransform);
-        this._trackBallLayer.setParent(this.node);
+        this._trackBallLayer.setParent(contentParent);
         this._trackBallLayer.setPosition(0, 0, 0);
     }
 
@@ -514,9 +552,11 @@ export class GameManager extends Component {
             vslotNode.destroy();
             return null;
         }
-        EventBus.emit(GameEvent.ColorBlockGridBoundsReady, {
+        this._gridLayoutBounds = {
             topWorld: gridUI.convertToWorldSpaceAR(new Vec3(0, gridHeight, 0)),
-        });
+            bottomWorld: gridUI.convertToWorldSpaceAR(Vec3.ZERO),
+            rightWorld: gridUI.convertToWorldSpaceAR(new Vec3(gridWidth * 0.5, gridHeight * 0.5, 0)),
+        };
         this._vslot = vslot;
         return {
             terrainName: `Level_${def.levelId}_Grid`,
@@ -803,7 +843,8 @@ export class GameManager extends Component {
 
     /** 读取本关唯一 VSlot 的 EntranceGate 世界坐标。 */
     private resolveEntryPos(): Vec3 {
-        const ui = this.getComponent(UITransform);
+        const ui = this._gameContentRoot?.getComponent(UITransform)
+            ?? this.getComponent(UITransform);
         const worldPos = this._vslot?.getEntranceWorldPos() ?? null;
         if (!worldPos) {
             return new Vec3(CFG.fallbackEntryX, CFG.fallbackEntryY, 0);
