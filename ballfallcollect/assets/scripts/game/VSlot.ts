@@ -14,9 +14,9 @@ const { ccclass } = _decorator;
  * 必需 Prefab 结构（节点名称必须完全一致）：
  *   VSlot                [UITransform, VSlot]
  *   ├─ PlateLBG          [UITransform, Sprite，仅视觉背景]
- *   │  └─ PlateL         [UITransform, Sprite, RigidBody2D(Static), BoxCollider2D]
  *   ├─ PlateRBG          [UITransform, Sprite，仅视觉背景]
- *   │  └─ PlateR         [UITransform, Sprite, RigidBody2D(Static), BoxCollider2D]
+ *   ├─ PlateL            [UITransform, Sprite, RigidBody2D(Static), BoxCollider2D]
+ *   ├─ PlateR            [UITransform, Sprite, RigidBody2D(Static), BoxCollider2D]
  *   ├─ EntranceGate      [UITransform, Sprite]
  *   │  └─ PhysicsBody  [UITransform, RigidBody2D(Static), BoxCollider2D]
  *   ├─ Startgridpos      [UITransform，仅作 ColorBlock 网格底部中心锚点]

@@ -452,7 +452,7 @@ export class GameManager extends Component {
             : gridStart.position.clone();
         gridRoot.setPosition(startLocal);
 
-        if (!this.createEmptyGridRects(
+        if (!this.createGridCarrier(
             gridRoot, grid, rowOffset, colOffset,
             rows, columns, blockWidth, blockHeight, stepX, stepY, gridWidth,
         )) {
@@ -515,11 +515,11 @@ export class GameManager extends Component {
     }
 
     /**
-     * 固定 7×7 空区绘制成一块连续的玩具机器面板。
-     * 所有单元与连接桥都落在同一个 Graphics 中：内部重叠消除接缝，
-     * 只有与玩法格相邻的真实外边界保留圆角和网格间距。
+     * 为所有非空 ColorBlock / Boxes 绘制一块连续托架。
+     * 关卡校验保证非空格四方向连通，因此托架自然形成一个稳定主体；
+     * 空白区域直接露出 VSlot / Playfield 背景，不再铺成大色板。
      */
-    private createEmptyGridRects(
+    private createGridCarrier(
         parent: Node,
         grid: LevelGrid,
         rowOffset: number,
@@ -540,7 +540,7 @@ export class GameManager extends Component {
             }
         }
 
-        const layer = new Node('RectFillLayer');
+        const layer = new Node('GridCarrier');
         const layerUI = layer.addComponent(UITransform);
         layerUI.setAnchorPoint(0.5, 0);
         layerUI.setContentSize(gridWidth, blockHeight + Math.max(0, rows - 1) * stepY);
@@ -556,27 +556,27 @@ export class GameManager extends Component {
             -gridWidth / 2 + blockWidth / 2 + col * stepX;
         const cellY = (row: number): number =>
             blockHeight / 2 + (rows - 1 - row) * stepY;
-        // 把“单元 + 桥 + 四空交点”展开为 13×13 微网格。
+        // 把“非空单元 + 桥 + 四格交点”展开为 13×13 微网格。
         // 微格宽高交替为 block / gap，随后只提取整个区域的外轮廓。
         const microRows = rows * 2 - 1;
         const microCols = columns * 2 - 1;
         const filled = Array.from({ length: microRows }, () => new Array(microCols).fill(false));
-        const isEmpty = (row: number, col: number): boolean =>
-            row >= 0 && row < rows && col >= 0 && col < columns && !occupied[row][col];
+        const isCarrier = (row: number, col: number): boolean =>
+            row >= 0 && row < rows && col >= 0 && col < columns && occupied[row][col];
 
         for (let mr = 0; mr < microRows; mr++) {
             for (let mc = 0; mc < microCols; mc++) {
                 const row = Math.floor(mr / 2);
                 const col = Math.floor(mc / 2);
                 if (mr % 2 === 0 && mc % 2 === 0) {
-                    filled[mr][mc] = isEmpty(row, col);
+                    filled[mr][mc] = isCarrier(row, col);
                 } else if (mr % 2 === 0) {
-                    filled[mr][mc] = isEmpty(row, col) && isEmpty(row, col + 1);
+                    filled[mr][mc] = isCarrier(row, col) && isCarrier(row, col + 1);
                 } else if (mc % 2 === 0) {
-                    filled[mr][mc] = isEmpty(row, col) && isEmpty(row + 1, col);
+                    filled[mr][mc] = isCarrier(row, col) && isCarrier(row + 1, col);
                 } else {
-                    filled[mr][mc] = isEmpty(row, col) && isEmpty(row, col + 1)
-                        && isEmpty(row + 1, col) && isEmpty(row + 1, col + 1);
+                    filled[mr][mc] = isCarrier(row, col) && isCarrier(row, col + 1)
+                        && isCarrier(row + 1, col) && isCarrier(row + 1, col + 1);
                 }
             }
         }
@@ -648,17 +648,21 @@ export class GameManager extends Component {
         };
 
         // 轮廓只存在于连通区真正的外边界，内部没有任何抗锯齿边缘。
-        graphics.lineWidth = 12;
-        graphics.strokeColor = new Color(63, 136, 156, 70);
-        traceLoops(-5);
+        graphics.lineWidth = 16;
+        graphics.strokeColor = new Color(55, 113, 145, 65);
+        traceLoops(-6);
         graphics.stroke();
-        graphics.lineWidth = 7;
-        graphics.strokeColor = new Color(224, 250, 250, 255);
+        graphics.lineWidth = 12;
+        graphics.strokeColor = new Color(181, 219, 232, 255);
         traceLoops();
         graphics.stroke();
-        graphics.fillColor = new Color(151, 218, 220, 255);
+        graphics.fillColor = new Color(213, 236, 236, 255);
         traceLoops();
         graphics.fill();
+        graphics.lineWidth = 3;
+        graphics.strokeColor = new Color(255, 255, 255, 225);
+        traceLoops();
+        graphics.stroke();
         return true;
     }
 

@@ -39,8 +39,6 @@ export class ColorBlock extends Component {
     private _background: Node | null = null;
     private _slotsRoot: Node | null = null;
     private _bgSprite: Sprite | null = null;
-    /** Prefab 中 Background 的原始颜色，Unknown 揭示前保持该色而不赋玩法颜色。 */
-    private _bgBaseColor: Color = new Color(255, 255, 255, 255);
     private _lid: Node | null = null;
     private _lidSprite: Sprite | null = null;
     private _unknown: Node | null = null;
@@ -97,7 +95,6 @@ export class ColorBlock extends Component {
         this._background = this.node.getChildByPath('Background');
         if (this._background) {
             this._bgSprite = this._background.getComponent(Sprite) ?? this._background.addComponent(Sprite);
-            this._bgBaseColor = this._bgSprite.color.clone();
         } else {
             console.warn('[ColorBlock] 未找到 Background 子节点，背景将不会染色。');
         }
@@ -446,7 +443,7 @@ export class ColorBlock extends Component {
         if (!this._bgSprite) return;
 
         if (this.blockType === ColorBlockType.Unknown && !this._typeRevealed) {
-            this._bgSprite.color = this._bgBaseColor.clone();
+            this._bgSprite.color = new Color(0xDD, 0xDD, 0xDD, 255);
             return;
         }
 
@@ -483,7 +480,7 @@ export class ColorBlock extends Component {
     private redrawLidColor(): void {
         if (!this._lidSprite) return;
         if (this.blockType === ColorBlockType.Unknown && !this._typeRevealed) {
-            this._lidSprite.color = new Color(255, 255, 255, 255);
+            this._lidSprite.color = new Color(0xDD, 0xDD, 0xDD, 255);
             return;
         }
         const base = getColor(this.colorId);

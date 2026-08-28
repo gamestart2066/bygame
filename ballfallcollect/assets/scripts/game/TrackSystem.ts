@@ -416,6 +416,32 @@ export class TrackSystem extends Component {
 
         const segs = Math.max(24, CFG.trackDrawSegments);
         const P = this.perimeter;
+        const r = CFG.trackCornerRadius;
+        const hw = CFG.trackStraightHalf;
+        const chassisPadX = 24;
+        const chassisPadY = 22;
+        const chassisX = this._center.x - hw - r - chassisPadX;
+        const chassisY = this._center.y - r - chassisPadY;
+        const chassisWidth = 2 * (hw + r + chassisPadX);
+        const chassisHeight = 2 * (r + chassisPadY);
+        const chassisRadius = r + chassisPadY;
+
+        // 固定底板：柔和阴影、浅色机器外壳、蓝灰内凹面板。
+        g.fillColor = new Color(52, 109, 145, 65);
+        g.roundRect(chassisX, chassisY - 7, chassisWidth, chassisHeight, chassisRadius);
+        g.fill();
+        g.fillColor = new Color(225, 244, 249, 255);
+        g.roundRect(chassisX, chassisY, chassisWidth, chassisHeight, chassisRadius);
+        g.fill();
+        g.fillColor = new Color(181, 215, 230, 255);
+        g.roundRect(
+            chassisX + 7,
+            chassisY + 7,
+            chassisWidth - 14,
+            chassisHeight - 14,
+            Math.max(1, chassisRadius - 7),
+        );
+        g.fill();
 
         const strokePath = (width: number, color: Color): void => {
             g.lineWidth = width;
@@ -429,10 +455,21 @@ export class TrackSystem extends Component {
             g.stroke();
         };
 
-        strokePath(36, new Color(60, 120, 155, 75));
-        strokePath(30, new Color(229, 247, 251, 255));
-        strokePath(21, new Color(128, 177, 203, 255));
-        strokePath(13, new Color(191, 222, 236, 255));
+        // 轨道槽：外压边 → 深槽 → 内侧反光。逻辑路径本身完全不变。
+        strokePath(38, new Color(235, 249, 252, 255));
+        strokePath(29, new Color(95, 147, 180, 255));
+        strokePath(19, new Color(157, 198, 218, 255));
+        strokePath(5, new Color(211, 235, 244, 210));
+
+        // 右半圆上的轻量方向提示；只负责视觉，不参与轨道方向计算。
+        const arrowX = this._center.x + hw + r;
+        const arrowY = this._center.y;
+        g.fillColor = new Color(75, 126, 165, 190);
+        g.moveTo(arrowX - 7, arrowY + 7);
+        g.lineTo(arrowX + 7, arrowY + 7);
+        g.lineTo(arrowX, arrowY - 8);
+        g.close();
+        g.fill();
 
     }
 }

@@ -100,6 +100,8 @@ export const CFG = {
     colorBlockLidHideDuration: 0.22,
     /** ColorBlock 释放完全部小球后，根节点缩小至隐藏的时长 */
     colorBlockDepleteDuration: 0.2,
+    /** 非第一行 CollectBox 的整体不透明度；第一行固定恢复为 1 */
+    collectBoxWaitingOpacity: 1,
     /** ColorBlockBoxes 的 Num 未填有效正整数时，默认可派发格子数 */
     colorBlockBoxesDefaultCount: 3,
     /** 下方 ColorBlock 点击成功后，Boxes 开始派发前的等待时间 */

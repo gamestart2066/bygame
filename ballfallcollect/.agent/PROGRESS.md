@@ -24,7 +24,7 @@
 格子 / 每格 9 球 / 点击释放 / V 槽汇聚 / 刚体重力 / 跑道形轨道 /
 24 离散槽位 / 自动入轨 / 彩色收纳箱 / 同色入箱 / 满 3 消失 / 24 容量限制 / 胜利 / 失败
 
-- **配置驱动关卡**：`all_levels_simple_edited.json` 提供真实类型网格，`LevelGrids.json.levels[].layout` 直接选择布局，同一记录维护 path 配色/箱序难度；生成逻辑唯一且不再保存 mode，布局最大 7×7 且只允许奇数列，空白单元由 `rect.prefab` 填充，rect 之间无缝、与玩法格保留间距
+- **配置驱动关卡**：`all_levels_simple_edited.json` 提供真实类型网格，`LevelGrids.json.levels[].layout` 直接选择布局，同一记录维护 path 配色/箱序难度；生成逻辑唯一且不再保存 mode，布局最大 7×7 且只允许奇数列，所有非空 ColorBlock/Boxes 由单一 `GridCarrier/Graphics` 绘制无接缝连续托架，空白区域直接露出玩法背景
 - **网格解锁**：最底行初始开放，点击后按四方向邻接逐步解锁；锁定态由 ColorBlock/Lid 显示
 - **ColorBlock 类型框架**：当前支持 normal、unknown 与 boxes；Boxes 预生成并预配色内部格子，下方格点击后逐个 Tween 派发，其球数从关卡开始就纳入收纳箱闭环
 - **场地球上限**：ColorBlock 点击时整批预占 9 个轨道外名额，当前上限 36；轨道接收后逐球释放名额，超限通过 HUD 字幕提示
@@ -32,7 +32,7 @@
 - **小球资源链路**：Ball Prefab + 关卡前预热的 BallPool；ColorBlock 实体 Slot 两阶段出球，Pool 复用执行深度 reset
 - **收纳箱队列**：CollectBox Prefab 驱动、固定 4 列；每箱 3 个可编辑 Slot，每槽以 BallVisual 作为飞入目标和最终显示；仅已完成补位的第一行可收
 - **收纳箱展示**：四列中的全部箱子始终显示，不再用关卡参数隐藏后排；可收权限仍只有每列第一行
-- **轨道衔接与节奏**：EntranceGate 与轨道上沿保留可调间隙；轨道固定槽位由 `BallSlot.prefab` 实例全程显示并同步运动；真实 Ball 切到上层后两段 Tween 跳入移动槽位；非头球会沿轨道逐槽加速补空，到位后再转移槽位所有权；全部 ColorBlock 点击后切换为基础速度 2 倍
+- **轨道衔接与节奏**：EntranceGate 与轨道上沿保留可调间隙；轨道由固定 Graphics 绘制玩具机底板和内凹槽，固定槽位由 `BallSlot.prefab` 实例全程显示并同步运动；真实 Ball 切到上层后两段 Tween 跳入移动槽位；非头球会沿轨道逐槽加速补空，到位后再转移槽位所有权；全部 ColorBlock 点击后切换为基础速度 2 倍
 - **EntranceGate 防卡死**：轨道未满且 Gate 上方多球持续低速时，对最低的少量物理球施加交替方向速度扰动；卡死计时不依赖空槽经过入口的瞬时窗口，低速条件短暂失效时缓慢衰减
 - **胜负规则**：满轨后仅在所有已到位首箱均无法匹配任一占槽球时累计颜色死锁宽限；补位/完成动画期间暂停，空列忽略
 - **全局手感参数**：`trackSpeed` 与 `loseGraceTime` 只由 `CFG` 控制，不允许关卡 JSON 覆盖

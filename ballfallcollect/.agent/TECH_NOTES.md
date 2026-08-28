@@ -206,14 +206,16 @@ SystemStatic(墙) → Track → BoxLayer → BallLayer(下落/等待) → TrackB
 
 ```
 VSlot [VSlot]
-├─ PlateL / PlateR
+├─ PlateLBG / PlateRBG ← 仅视觉背景
+├─ PlateL / PlateR     ← Prefab 内置 Static RigidBody2D + BoxCollider2D
 ├─ EntranceGate     ← 轨道入口参考点与可视节点；VSlot 自动补挂必须跳过
-│  └─ PhysicsBody  ← Prefab 内置 Static RigidBody2D + BoxCollider2D，物理尺寸在此编辑
+│  ├─ PhysicsBody  ← Prefab 内置 Static RigidBody2D + BoxCollider2D，物理尺寸在此编辑
+│  └─ PhysicsBody-001
 ├─ Startgridpos     ← ColorBlockGrid 的底部中心；不得挂 StaticPlate
 └─ BoxCollectPos    ← CollectBox 第一行中心；不得挂 StaticPlate
 
 ColorBlockGrid [UITransform anchor=(0.5,0)]  ← 运行时节点
-├─ RectFillLayer ← 单一 Graphics 按 7×7 空白拓扑绘制连续机器面板
+├─ GridCarrier ← 单一 Graphics 按非空 ColorBlock/Boxes 拓扑绘制连续托架
 └─ ColorBlock × 当前关卡 layout ID 对应的非空类型单元
 ```
 
@@ -222,7 +224,7 @@ ColorBlockGrid [UITransform anchor=(0.5,0)]  ← 运行时节点
 
 - `grid` 单元使用自然数类型码：`0=空、1=normal、2=unknown、3=boxes`；代码中由 `ColorBlockType` 数值枚举作为唯一解释
 - 新增 ColorBlock 类型时必须同时扩展 `ColorBlockType`、校验器与对应表现策略，禁止在 GameManager 散写类型分支
-- `unknown` 不得出现在最后一行；解锁前 `Unknown` 节点遮蔽信息、Slots 隐藏，Background 显示 Prefab 原色但不赋玩法颜色；解锁时恢复颜色并复用标准动画
+- `unknown` 不得出现在最后一行；解锁前 `Unknown` 节点遮蔽信息、Slots 隐藏，Background 与 Lid 统一使用 `#DDDDDD`，不泄露玩法颜色；解锁时恢复真实颜色并复用标准动画
 - `boxes` 不得出现在最后一行，且直接下方必须是 normal/unknown；`Num(Label)` 留空时使用 `CFG.colorBlockBoxesDefaultCount`，成功点击后等待 `colorBlockBoxesDispatchDelay` 再显示并 Tween 派发
 - Boxes 内容在构建 `LevelPlan` 前就 instantiate 为 inactive ColorBlock，因此颜色数、总球数、收纳箱数从开局就一致；派发到位前不可点击
 - ColorBlock 的 `path` 是从最底行（path=1）经四方向相邻关系到达该格的最短解锁层级；Boxes 内格子依派发顺序在其直接下方目标格 path 上逐次 +1
@@ -231,7 +233,7 @@ ColorBlockGrid [UITransform anchor=(0.5,0)]  ← 运行时节点
 - 收纳箱 `flat` 必须按 path 排序后的 `blockColors` 从后向前展开（每格重复 `ballsPerBlock/boxCapacity` 次），再依 `boxShuffleSegments` 分段洗牌。段顺序不得交叉，同一 seed 必须可复现
 - 轨道的 `_slots` 仍是唯一逻辑占用表；每个索引固定对应一个 `BallSlot.prefab` 实例，实例只负责固定槽位表现并全程显示，随弧长位置逐帧移动，不跟随占用状态显隐，禁止把 Prefab 节点作为逻辑占用来源。
 - ColorBlock 耗尽回调由 `GameManager.onColorBlockDepleted()` 统一调用 `playDepleteAndHide()`：根节点缩小后隐藏，normal/unknown/boxes 派发格子不得分叉保留 Background
-- 外部布局所有行等长、最大 7×7 且列数必须为奇数，保证中心列与固定 7 列可视网格 / Startgridpos 对齐；小布局在固定 7×7 中底部对齐、水平居中。空白区域由单一 `RectFillLayer/Graphics` 绘制：先把空格、正交连接桥和四空交点展开为交替 block/gap 尺寸的微网格，再提取整个填充区域的闭合外轮廓；阴影、边框和主体只沿该轮廓绘制，内部不存在独立单元的抗锯齿边缘或 Sprite 接缝，与 ColorBlock/Boxes 始终保留 `colorBlockGridGap`。所有非空节点必须通过上下左右相邻形成一个连通块，最底行至少有一个 normal ColorBlock
+- 外部布局所有行等长、最大 7×7 且列数必须为奇数，保证中心列与固定 7 列可视网格 / Startgridpos 对齐；小布局在固定 7×7 中底部对齐、水平居中。所有非空 ColorBlock/Boxes 由单一 `GridCarrier/Graphics` 承托：先把非空单元、正交连接桥和四格交点展开为交替 block/gap 尺寸的微网格，再提取整个连通区域的闭合外轮廓；阴影、外沿、主体和高光只沿该轮廓绘制，内部不存在独立单元的抗锯齿边缘或 Sprite 接缝，空白区域直接露出玩法背景。所有非空节点必须通过上下左右相邻形成一个连通块，最底行至少有一个 normal ColorBlock
 - GameManager 保存生成格子的 row/col，并建立四方向邻接索引。只有全局最底行初始解锁；格子成功开始释放时解锁上/下/左/右邻居
 - `ColorBlock.prefab/Lid(Sprite)` 是锁定遮罩：setup 时赋予本格颜色，锁定显示、解锁隐藏；禁止运行时动态创建 Lid
 - 解锁表现使用两个并行 Tween：ColorBlock 根节点按 `CFG.colorBlockUnlockPulseScale/Duration` 脉冲，Lid 按 `colorBlockLidHideDuration` 缩小后隐藏；结束/取消时必须恢复两者 Prefab 基准 scale

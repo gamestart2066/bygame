@@ -1,6 +1,6 @@
 import {
     _decorator, Component, Node, Vec3, Color, tween, Tween,
-    Prefab, Sprite, instantiate,
+    Prefab, Sprite, UIOpacity, instantiate,
 } from 'cc';
 import { BallColor, CFG, getColor } from '../core/GameTypes';
 import { BallVisuals } from './BallVisuals';
@@ -38,6 +38,7 @@ export class CollectBox extends Component {
     /** 已锁定目标槽、但小球尚未飞到的数量。 */
     private _reserved: number = 0;
     private _boxSprite: Sprite | null = null;
+    private _uiOpacity: UIOpacity | null = null;
     private _slots: Node[] = [];
     private _slotTargets: Node[] = [];
     private _slotSprites: Sprite[] = [];
@@ -78,6 +79,7 @@ export class CollectBox extends Component {
             console.error('[CollectBox] CollectBox.prefab 根节点必须提供 Sprite 组件。');
             return false;
         }
+        this._uiOpacity = this.getComponent(UIOpacity) ?? this.node.addComponent(UIOpacity);
         const slotsRoot = this.node.getChildByName('Slots');
         this._slots = slotsRoot ? slotsRoot.children.slice() : [];
         if (this._slots.length !== CFG.boxCapacity) {
@@ -196,12 +198,15 @@ export class CollectBox extends Component {
         return this._finished;
     }
 
-    /** 用 Prefab 根 Sprite 表现箱体颜色；等待箱整体变暗。 */
+    /** 箱体始终保持完整玩法颜色；等待箱只降低整体不透明度，不再压暗 RGB。 */
     private redraw(): void {
         const base = getColor(this.colorId);
-        const dim = this._collectable ? 1 : 0.4;
         if (this._boxSprite) {
-            this._boxSprite.color = new Color(base.r * dim, base.g * dim, base.b * dim, 255);
+            this._boxSprite.color = new Color(base.r, base.g, base.b, 255);
+        }
+        if (this._uiOpacity) {
+            const ratio = this._collectable ? 1 : CFG.collectBoxWaitingOpacity;
+            this._uiOpacity.opacity = Math.round(255 * Math.max(0, Math.min(1, ratio)));
         }
 
         // Slot 外观保持 Prefab 原色；只给 BallVisual 应用球图、球色和占用显示。
