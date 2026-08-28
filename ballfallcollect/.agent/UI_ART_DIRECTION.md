@@ -20,7 +20,7 @@
 
 目录：`assets/play/texture/ui/toy/`
 
-- `ball-neutral-v2.png`：128×128；按 Ball/Sprite 最终 26×26 阅读尺度简化。
+- `ball-neutral.png`：128×128 RGBA 透明底图；按 Ball/Sprite 最终 26×26 阅读尺度简化。
 - `collect-box-neutral-v2.png`：280×120；严格对应 CollectBox 140×60 与三槽横排。
 - `color-block-neutral-v2.png`：160×160；对应 ColorBlock 80×80 与 3×3 Slots 覆盖。
 - `color-block-boxes-v2.png`：160×160；对应 ColorBlockBoxes 80×80。

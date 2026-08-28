@@ -27,13 +27,13 @@
   ],
   "_props": [
     {
-      "shadowStrength": 0.75,
-      "highlightStrength": 0.53,
-      "saturation": 1.6,
-      "shadowStart": 0.3,
-      "shadowEnd": 0.82,
-      "highlightStart": 0.76,
-      "highlightEnd": 0.94
+      "shadowStrength": 0.68,
+      "highlightStrength": 0.18,
+      "saturation": 1.09,
+      "shadowStart": 0.44,
+      "shadowEnd": 1,
+      "highlightStart": 0.75,
+      "highlightEnd": 1
     }
   ]
 }
