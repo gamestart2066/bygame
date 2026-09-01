@@ -11,8 +11,8 @@ const TITLE_WIN = new Color(255, 220, 120, 255);
 const TITLE_LOSE = new Color(255, 140, 140, 255);
 
 /** BtnHall 的 Y 坐标：有「下一关」时下移，没有时接在「重玩」下面 */
-const HALL_Y_WITH_NEXT = -250;
-const HALL_Y_WITHOUT_NEXT = -160;
+const HALL_Y_WITH_NEXT = -205;
+const HALL_Y_WITHOUT_NEXT = -135;
 
 /**
  * 结算界面（胜利 / 失败共用）—— **动态 Popup**，来源 `play/ui/ResultUI.prefab`。

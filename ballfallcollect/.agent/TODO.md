@@ -20,7 +20,6 @@
 
 - [ ] 屏幕适配验证（多机型下 Widget 与安全区表现）
 - [ ] 根据 1000 关分段实跑反馈调整各关 `layout` 引用，以及 `LevelGrids.json` 的颜色/箱序和难度曲线
-- [ ] UI 美术化：当前固定 UI 与 Popup Prefab 均为原型表现，待统一正式视觉风格
 - [ ] 资源目录 `play/audio`、`play/texture` 按需创建（路径已在 `ResPaths` 预留）
 
 ---

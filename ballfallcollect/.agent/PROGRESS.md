@@ -47,6 +47,7 @@
 - `scene/`：`SceneRouter` + Loading / Hall / Game 三场景入口，三场景 Canvas 均已挂对应 Entry
 - `ui/`：**实体节点驱动**。Loading / Hall / GameHUD 为场景固定节点；
   Pause / Result 为 `play/ui/` 下的 Prefab，由 `UIManager` 管理并置于 `PopupLayer`；
+  Loading、Hall、Pause、Result 已统一为浅蓝玩具风正式界面，Loading/Hall 共享彩球收纳主视觉，
   Pause 支持继续游戏、重玩当前关和返回大厅
   （详见 `TECH_NOTES.md` 4.5）
 
